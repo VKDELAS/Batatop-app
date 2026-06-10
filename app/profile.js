@@ -1,359 +1,138 @@
-import {
-  View,
-  Text,
-  ScrollView,
-  StyleSheet,
-  Animated,
-  Pressable,
-  Image,
-  Modal,
-  TextInput,
-  ActivityIndicator,
-} from 'react-native';
-import { useState, useRef } from 'react';
+import { View, Text, ScrollView, StyleSheet, Pressable, Image, Switch, Alert, TextInput, Modal } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS, ANIMATIONS } from '../constants/theme';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 
-function PressableScale({ children, onPress, style }) {
-  const scale = useRef(new Animated.Value(1)).current;
-
-  const handlePressIn = () => {
-    Animated.timing(scale, {
-      toValue: 0.95,
-      duration: ANIMATIONS.fast,
-      useNativeDriver: true,
-    }).start();
-  };
-
-  const handlePressOut = () => {
-    Animated.timing(scale, {
-      toValue: 1,
-      duration: ANIMATIONS.normal,
-      useNativeDriver: true,
-    }).start();
-  };
-
+function ProfileHeader({ user, onEditPress }) {
   return (
-    <Pressable
-      onPress={onPress}
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
-      style={style}
-    >
-      <Animated.View style={{ transform: [{ scale }] }}>
-        {children}
-      </Animated.View>
-    </Pressable>
-  );
-}
-
-/**
- * Item de Menu
- */
-function MenuItem({ icon, label, value, onPress, rightIcon = true }) {
-  return (
-    <PressableScale style={s.menuItem} onPress={onPress}>
-      <View style={s.menuItemLeft}>
-        <View style={s.menuItemIconContainer}>
-          <Ionicons name={icon} size={20} color={COLORS.primary} />
+    <View style={s.headerContainer}>
+      <View style={s.profileTop}>
+        <View style={s.profileImageWrapper}>
+          <Image
+            source={{ uri: 'https://api.dicebear.com/7.x/avataaars/png?seed=Felix' }}
+            style={s.profileImage}
+          />
+          <Pressable style={s.editImageBtn} onPress={onEditPress}>
+            <Ionicons name="camera" size={16} color={COLORS.white} />
+          </Pressable>
         </View>
-        <View style={s.menuItemContent}>
-          <Text style={s.menuItemLabel}>{label}</Text>
-          {value && <Text style={s.menuItemValue}>{value}</Text>}
+        <View style={s.userInfo}>
+          <Text style={s.userName}>{user.name}</Text>
+          <Text style={s.userEmail}>{user.email}</Text>
+          <Text style={s.userPhone}>{user.phone}</Text>
         </View>
       </View>
-      {rightIcon && <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />}
-    </PressableScale>
-  );
-}
-
-/**
- * Seção
- */
-function Section({ title, children }) {
-  return (
-    <View style={s.section}>
-      <Text style={s.sectionTitle}>{title}</Text>
-      <View style={s.sectionContent}>{children}</View>
+      <Pressable style={s.editProfileBtn} onPress={onEditPress}>
+        <Text style={s.editProfileBtnText}>Editar Perfil</Text>
+      </Pressable>
     </View>
   );
 }
 
-/**
- * Modal de Editar Perfil
- */
-function EditProfileModal({ visible, onClose, onSave }) {
-  const [name, setName] = useState('João Silva');
-  const [email, setEmail] = useState('joao@example.com');
-  const [phone, setPhone] = useState('(11) 98765-4321');
-  const [loading, setLoading] = useState(false);
-
-  const handleSave = () => {
-    setLoading(true);
-    setTimeout(() => {
-      onSave({ name, email, phone });
-      setLoading(false);
-      onClose();
-    }, 500);
-  };
-
+function MenuItem({ icon, label, value, onPress, isLast = false, color = COLORS.primary }) {
   return (
-    <Modal visible={visible} animationType="slide" transparent={false}>
-      <View style={s.modalContainer}>
-        {/* Header */}
-        <View style={s.modalHeader}>
-          <Pressable onPress={onClose}>
-            <Ionicons name="close" size={24} color={COLORS.text} />
-          </Pressable>
-          <Text style={s.modalTitle}>Editar Perfil</Text>
-          <View style={{ width: 24 }} />
+    <Pressable 
+      style={[s.menuItem, isLast && { borderBottomWidth: 0 }]} 
+      onPress={onPress}
+    >
+      <View style={s.menuItemLeft}>
+        <View style={[s.menuIconBg, { backgroundColor: color + '15' }]}>
+          <Ionicons name={icon} size={20} color={color} />
         </View>
-
-        <ScrollView style={s.modalContent} showsVerticalScrollIndicator={false}>
-          {/* Avatar */}
-          <View style={s.modalAvatarSection}>
-            <Image
-              source={{ uri: 'https://via.placeholder.com/120?text=User' }}
-              style={s.modalAvatar}
-            />
-            <Pressable style={s.modalAvatarBtn}>
-              <Ionicons name="camera" size={20} color={COLORS.text} />
-            </Pressable>
-          </View>
-
-          {/* Campos */}
-          <View style={s.modalForm}>
-            <View style={s.formGroup}>
-              <Text style={s.formLabel}>Nome Completo</Text>
-              <TextInput
-                style={s.formInput}
-                value={name}
-                onChangeText={setName}
-                placeholderTextColor={COLORS.textMuted}
-              />
-            </View>
-
-            <View style={s.formGroup}>
-              <Text style={s.formLabel}>Email</Text>
-              <TextInput
-                style={s.formInput}
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                placeholderTextColor={COLORS.textMuted}
-              />
-            </View>
-
-            <View style={s.formGroup}>
-              <Text style={s.formLabel}>Telefone</Text>
-              <TextInput
-                style={s.formInput}
-                value={phone}
-                onChangeText={setPhone}
-                keyboardType="phone-pad"
-                placeholderTextColor={COLORS.textMuted}
-              />
-            </View>
-          </View>
-
-          {/* Botão Salvar */}
-          <PressableScale
-            style={s.modalSaveBtn}
-            onPress={handleSave}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator size="small" color={COLORS.text} />
-            ) : (
-              <Text style={s.modalSaveBtnText}>Salvar Alterações</Text>
-            )}
-          </PressableScale>
-        </ScrollView>
+        <View style={s.menuItemTextContainer}>
+          <Text style={s.menuItemLabel}>{label}</Text>
+          {value && <Text style={s.menuItemValue}>{value}</Text>}
+        </View>
       </View>
-    </Modal>
+      <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
+    </Pressable>
   );
 }
 
-/**
- * Tela de Perfil
- */
+function Section({ title, children }) {
+  return (
+    <View style={s.section}>
+      <Text style={s.sectionTitle}>{title}</Text>
+      <View style={s.sectionContent}>
+        {children}
+      </View>
+    </View>
+  );
+}
+
 export default function Profile() {
   const router = useRouter();
-  const [editModalVisible, setEditModalVisible] = useState(false);
-  const [profileData, setProfileData] = useState({
-    name: 'João Silva',
-    email: 'joao@example.com',
-    phone: '(11) 98765-4321',
+  const [user, setUser] = useState({
+    name: 'Cliente Batatop',
+    email: 'cliente@batatop.com.br',
+    phone: '(14) 99999-9999',
   });
+  const [notifications, setNotifications] = useState(true);
 
-  const handleEditSave = (data) => {
-    setProfileData(data);
+  const handleLogout = () => {
+    Alert.alert('Sair', 'Deseja realmente sair da sua conta?', [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Sair', style: 'destructive', onPress: () => router.replace('/') }
+    ]);
   };
 
   return (
     <View style={s.container}>
       <ScrollView style={s.scroll} showsVerticalScrollIndicator={false}>
-        {/* ===== HEADER DO PERFIL ===== */}
-        <View style={s.profileHeader}>
-          <Image
-            source={{ uri: 'https://via.placeholder.com/120?text=User' }}
-            style={s.profileAvatar}
-          />
-          <View style={s.profileInfo}>
-            <Text style={s.profileName}>{profileData.name}</Text>
-            <Text style={s.profileEmail}>{profileData.email}</Text>
-            <View style={s.profileStats}>
-              <View style={s.profileStat}>
-                <Text style={s.profileStatValue}>12</Text>
-                <Text style={s.profileStatLabel}>Pedidos</Text>
-              </View>
-              <View style={s.profileStatDivider} />
-              <View style={s.profileStat}>
-                <Text style={s.profileStatValue}>4.8</Text>
-                <Text style={s.profileStatLabel}>Avaliação</Text>
-              </View>
-              <View style={s.profileStatDivider} />
-              <View style={s.profileStat}>
-                <Text style={s.profileStatValue}>R$ 340</Text>
-                <Text style={s.profileStatLabel}>Gasto</Text>
-              </View>
-            </View>
+        <ProfileHeader user={user} onEditPress={() => Alert.alert('Editar', 'Funcionalidade em breve!')} />
+
+        <View style={s.statsGrid}>
+          <View style={s.statCard}>
+            <Text style={s.statValue}>12</Text>
+            <Text style={s.statLabel}>Pedidos</Text>
+          </View>
+          <View style={s.statCard}>
+            <Text style={s.statValue}>R$ 450</Text>
+            <Text style={s.statLabel}>Economia</Text>
+          </View>
+          <View style={s.statCard}>
+            <Text style={s.statValue}>4</Text>
+            <Text style={s.statLabel}>Cupons</Text>
           </View>
         </View>
 
-        {/* ===== BOTÃO DE EDITAR ===== */}
-        <PressableScale
-          style={s.editBtn}
-          onPress={() => setEditModalVisible(true)}
-        >
-          <Ionicons name="pencil" size={18} color={COLORS.text} />
-          <Text style={s.editBtnText}>Editar Perfil</Text>
-        </PressableScale>
-
-        {/* ===== SEÇÃO: DADOS PESSOAIS ===== */}
-        <Section title="Dados Pessoais">
-          <MenuItem
-            icon="person"
-            label="Nome Completo"
-            value={profileData.name}
-            onPress={() => setEditModalVisible(true)}
-          />
-          <MenuItem
-            icon="mail"
-            label="Email"
-            value={profileData.email}
-            onPress={() => setEditModalVisible(true)}
-          />
-          <MenuItem
-            icon="call"
-            label="Telefone"
-            value={profileData.phone}
-            onPress={() => setEditModalVisible(true)}
-          />
+        <Section title="Minha Conta">
+          <MenuItem icon="location-outline" label="Endereços" value="2 cadastrados" onPress={() => {}} />
+          <MenuItem icon="card-outline" label="Pagamentos" value="Cartão **** 1234" onPress={() => {}} />
+          <MenuItem icon="heart-outline" label="Favoritos" value="5 itens" isLast onPress={() => {}} />
         </Section>
 
-        {/* ===== SEÇÃO: ENDEREÇOS ===== */}
-        <Section title="Endereços">
-          <MenuItem
-            icon="location"
-            label="Endereço Principal"
-            value="Rua das Flores, 123 - São Paulo"
-            onPress={() => {}}
-          />
-          <MenuItem
-            icon="add-circle"
-            label="Adicionar Novo Endereço"
-            onPress={() => {}}
-            rightIcon={false}
-          />
-        </Section>
-
-        {/* ===== SEÇÃO: PAGAMENTO ===== */}
-        <Section title="Formas de Pagamento">
-          <MenuItem
-            icon="card"
-            label="Cartão de Crédito"
-            value="Visa **** 4242"
-            onPress={() => {}}
-          />
-          <MenuItem
-            icon="wallet"
-            label="Adicionar Cartão"
-            onPress={() => {}}
-            rightIcon={false}
-          />
-        </Section>
-
-        {/* ===== SEÇÃO: FAVORITOS ===== */}
-        <Section title="Meus Favoritos">
-          <MenuItem
-            icon="heart"
-            label="Produtos Favoritos"
-            value="3 itens"
-            onPress={() => {}}
-          />
-        </Section>
-
-        {/* ===== SEÇÃO: NOTIFICAÇÕES ===== */}
         <Section title="Preferências">
-          <MenuItem
-            icon="notifications"
-            label="Notificações Push"
-            value="Ativadas"
-            onPress={() => {}}
-          />
-          <MenuItem
-            icon="mail-unread"
-            label="Email Marketing"
-            value="Desativado"
-            onPress={() => {}}
-          />
+          <View style={s.switchItem}>
+            <View style={s.menuItemLeft}>
+              <View style={[s.menuIconBg, { backgroundColor: COLORS.info + '15' }]}>
+                <Ionicons name="notifications-outline" size={20} color={COLORS.info} />
+              </View>
+              <Text style={s.menuItemLabel}>Notificações Push</Text>
+            </View>
+            <Switch 
+              value={notifications} 
+              onValueChange={setNotifications}
+              trackColor={{ false: COLORS.border, true: COLORS.primary }}
+              thumbColor={COLORS.white}
+            />
+          </View>
         </Section>
 
-        {/* ===== SEÇÃO: SUPORTE ===== */}
         <Section title="Suporte">
-          <MenuItem
-            icon="help-circle"
-            label="Central de Ajuda"
-            onPress={() => {}}
-            rightIcon={false}
-          />
-          <MenuItem
-            icon="chatbubbles"
-            label="Fale Conosco"
-            onPress={() => {}}
-            rightIcon={false}
-          />
-          <MenuItem
-            icon="document-text"
-            label="Termos e Condições"
-            onPress={() => {}}
-            rightIcon={false}
-          />
+          <MenuItem icon="help-circle-outline" label="Ajuda e Suporte" onPress={() => {}} />
+          <MenuItem icon="document-text-outline" label="Termos de Uso" isLast onPress={() => {}} />
         </Section>
 
-        {/* ===== BOTÃO LOGOUT ===== */}
-        <PressableScale
-          style={s.logoutBtn}
-          onPress={() => {
-            // Logout logic
-            router.push('/');
-          }}
-        >
-          <Ionicons name="log-out" size={18} color={COLORS.text} />
+        <Pressable style={s.logoutBtn} onPress={handleLogout}>
+          <Ionicons name="log-out-outline" size={20} color={COLORS.error} />
           <Text style={s.logoutBtnText}>Sair da Conta</Text>
-        </PressableScale>
+        </Pressable>
 
-        <View style={{ height: SPACING[8] }} />
+        <Text style={s.versionText}>Versão 2.0.1 (Build 42)</Text>
       </ScrollView>
-
-      {/* Modal de Editar */}
-      <EditProfileModal
-        visible={editModalVisible}
-        onClose={() => setEditModalVisible(false)}
-        onSave={handleEditSave}
-      />
     </View>
   );
 }
@@ -361,257 +140,183 @@ export default function Profile() {
 const s = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.backgroundElevated,
   },
   scroll: {
     flex: 1,
   },
-
-  // ===== HEADER DO PERFIL =====
-  profileHeader: {
-    paddingHorizontal: SPACING[6],
-    paddingTop: SPACING[6],
-    paddingBottom: SPACING[4],
-    backgroundColor: COLORS.backgroundElevated,
+  headerContainer: {
+    backgroundColor: COLORS.white,
+    padding: SPACING[6],
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
-    flexDirection: 'row',
-    gap: SPACING[4],
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    gap: SPACING[5],
   },
-  profileAvatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: COLORS.backgroundCard,
-    borderWidth: 2,
-    borderColor: COLORS.borderAccent,
-  },
-  profileInfo: {
-    flex: 1,
-    gap: SPACING[2],
-  },
-  profileName: {
-    color: COLORS.text,
-    fontWeight: '800',
-    fontSize: TYPOGRAPHY.sizes.xl,
-  },
-  profileEmail: {
-    color: COLORS.textMuted,
-    fontSize: TYPOGRAPHY.sizes.sm,
-  },
-  profileStats: {
+  profileTop: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: SPACING[2],
-    gap: SPACING[3],
+    gap: SPACING[5],
+    width: '100%',
   },
-  profileStat: {
-    alignItems: 'center',
+  profileImageWrapper: {
+    position: 'relative',
   },
-  profileStatValue: {
-    color: COLORS.primary,
-    fontWeight: '700',
-    fontSize: TYPOGRAPHY.sizes.base,
+  profileImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: COLORS.borderLight,
   },
-  profileStatLabel: {
-    color: COLORS.textMuted,
-    fontSize: TYPOGRAPHY.sizes.xs,
-    marginTop: SPACING[1],
-  },
-  profileStatDivider: {
-    width: 1,
-    height: 24,
-    backgroundColor: COLORS.border,
-  },
-
-  // ===== BOTÃO EDITAR =====
-  editBtn: {
-    marginHorizontal: SPACING[6],
-    marginTop: SPACING[4],
-    marginBottom: SPACING[6],
+  editImageBtn: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
     backgroundColor: COLORS.primary,
-    borderRadius: RADIUS.lg,
-    paddingVertical: SPACING[3],
-    paddingHorizontal: SPACING[4],
-    flexDirection: 'row',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: SPACING[2],
-    ...SHADOWS.glow,
+    borderWidth: 2,
+    borderColor: COLORS.white,
   },
-  editBtnText: {
+  userInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  userName: {
+    fontSize: TYPOGRAPHY.sizes.lg,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  userEmail: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+  },
+  userPhone: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+  },
+  editProfileBtn: {
+    width: '100%',
+    paddingVertical: SPACING[3],
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+  },
+  editProfileBtnText: {
     color: COLORS.text,
     fontWeight: '700',
-    fontSize: TYPOGRAPHY.sizes.base,
+    fontSize: TYPOGRAPHY.sizes.sm,
   },
-
-  // ===== SEÇÕES =====
+  statsGrid: {
+    flexDirection: 'row',
+    padding: SPACING[5],
+    gap: SPACING[3],
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: COLORS.white,
+    padding: SPACING[4],
+    borderRadius: RADIUS.lg,
+    alignItems: 'center',
+    gap: 2,
+    ...SHADOWS.sm,
+  },
+  statValue: {
+    fontSize: TYPOGRAPHY.sizes.base,
+    fontWeight: '800',
+    color: COLORS.primary,
+  },
+  statLabel: {
+    fontSize: 10,
+    color: COLORS.textSecondary,
+    fontWeight: '600',
+  },
   section: {
-    paddingHorizontal: SPACING[6],
+    paddingHorizontal: SPACING[5],
     marginBottom: SPACING[6],
   },
   sectionTitle: {
-    color: COLORS.text,
+    fontSize: 12,
     fontWeight: '800',
-    fontSize: TYPOGRAPHY.sizes.base,
-    marginBottom: SPACING[3],
+    color: COLORS.textMuted,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 1,
+    marginBottom: SPACING[3],
+    marginLeft: 4,
   },
   sectionContent: {
-    backgroundColor: COLORS.backgroundCard,
-    borderRadius: RADIUS.lg,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    backgroundColor: COLORS.white,
+    borderRadius: RADIUS.xl,
     overflow: 'hidden',
     ...SHADOWS.sm,
   },
-
-  // ===== MENU ITEMS =====
   menuItem: {
-    paddingHorizontal: SPACING[4],
-    paddingVertical: SPACING[4],
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    padding: SPACING[4],
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    borderBottomColor: COLORS.borderLight,
   },
   menuItemLeft: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING[3],
+    gap: SPACING[4],
   },
-  menuItemIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(230, 57, 70, 0.1)',
+  menuIconBg: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  menuItemContent: {
-    flex: 1,
+  menuItemTextContainer: {
+    gap: 2,
   },
   menuItemLabel: {
+    fontSize: TYPOGRAPHY.sizes.sm,
+    fontWeight: '700',
     color: COLORS.text,
-    fontWeight: '600',
-    fontSize: TYPOGRAPHY.sizes.base,
   },
   menuItemValue: {
-    color: COLORS.textMuted,
-    fontSize: TYPOGRAPHY.sizes.sm,
-    marginTop: SPACING[1],
+    fontSize: 11,
+    color: COLORS.textSecondary,
   },
-
-  // ===== BOTÃO LOGOUT =====
-  logoutBtn: {
-    marginHorizontal: SPACING[6],
-    marginBottom: SPACING[6],
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-    borderRadius: RADIUS.lg,
-    paddingVertical: SPACING[3],
-    paddingHorizontal: SPACING[4],
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING[2],
-    borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.3)',
-  },
-  logoutBtnText: {
-    color: '#EF4444',
-    fontWeight: '700',
-    fontSize: TYPOGRAPHY.sizes.base,
-  },
-
-  // ===== MODAL =====
-  modalContainer: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  modalHeader: {
-    paddingHorizontal: SPACING[6],
-    paddingTop: SPACING[4],
-    paddingBottom: SPACING[4],
-    backgroundColor: COLORS.backgroundElevated,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+  switchItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    padding: SPACING[4],
+    backgroundColor: COLORS.white,
+    borderRadius: RADIUS.xl,
+    ...SHADOWS.sm,
   },
-  modalTitle: {
-    color: COLORS.text,
-    fontWeight: '800',
-    fontSize: TYPOGRAPHY.sizes.xl,
-  },
-  modalContent: {
-    flex: 1,
-    paddingHorizontal: SPACING[6],
-    paddingTop: SPACING[6],
-  },
-  modalAvatarSection: {
-    alignItems: 'center',
-    marginBottom: SPACING[8],
-  },
-  modalAvatar: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: COLORS.backgroundCard,
-    borderWidth: 2,
-    borderColor: COLORS.borderAccent,
-  },
-  modalAvatarBtn: {
-    position: 'absolute',
-    bottom: 0,
-    right: -SPACING[2],
-    backgroundColor: COLORS.primary,
-    borderRadius: 20,
-    width: 40,
-    height: 40,
+  logoutBtn: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    ...SHADOWS.glow,
-  },
-  modalForm: {
-    gap: SPACING[4],
-    marginBottom: SPACING[6],
-  },
-  formGroup: {
-    gap: SPACING[2],
-  },
-  formLabel: {
-    color: COLORS.text,
-    fontWeight: '700',
-    fontSize: TYPOGRAPHY.sizes.base,
-  },
-  formInput: {
-    backgroundColor: COLORS.backgroundCard,
-    borderRadius: RADIUS.lg,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingHorizontal: SPACING[4],
-    paddingVertical: SPACING[3],
-    color: COLORS.text,
-    fontSize: TYPOGRAPHY.sizes.base,
-  },
-  modalSaveBtn: {
-    backgroundColor: COLORS.primary,
-    borderRadius: RADIUS.lg,
+    gap: 8,
+    marginHorizontal: SPACING[5],
+    marginTop: SPACING[2],
     paddingVertical: SPACING[4],
-    paddingHorizontal: SPACING[6],
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: SPACING[6],
-    ...SHADOWS.glow,
+    borderRadius: RADIUS.xl,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: COLORS.error + '30',
   },
-  modalSaveBtnText: {
-    color: COLORS.text,
+  logoutBtnText: {
+    color: COLORS.error,
     fontWeight: '700',
-    fontSize: TYPOGRAPHY.sizes.base,
+    fontSize: TYPOGRAPHY.sizes.sm,
+  },
+  versionText: {
+    textAlign: 'center',
+    color: COLORS.textMuted,
+    fontSize: 11,
+    marginVertical: SPACING[8],
   },
 });

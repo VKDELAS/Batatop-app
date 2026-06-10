@@ -2,7 +2,7 @@ import { Stack, useRouter, usePathname } from 'expo-router';
 import { View, Text, StatusBar, StyleSheet, Pressable, Modal, ScrollView, TextInput, Animated } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 /* ============ CONTEXT DO CARRINHO ============ */
 import { createContext, useContext } from 'react';
@@ -136,16 +136,26 @@ function AddressModal({ visible, onClose, onSelectAddress }) {
   );
 }
 
-/* ============ HEADER GLOBAL ============ */
-function Header() {
+/* ============ SCROLL CONTEXT PARA HEADER ============ */
+const ScrollContext = createContext({
+  onScroll: () => {},
+});
+
+export const useScrollHandler = () => useContext(ScrollContext);
+
+/* ============ HEADER GLOBAL COM HIDE/SHOW SCROLL ============ */
+function Header({ onScrollHandler }) {
   const [selectedAddress, setSelectedAddress] = useState({
     label: 'Casa',
     address: 'Rua das Flores, 123',
   });
   const [addressModalVisible, setAddressModalVisible] = useState(false);
   const scaleAnim = useRef(new Animated.Value(1)).current;
+  const headerTranslateY = useRef(new Animated.Value(0)).current;
   const router = useRouter();
   const { totalItems } = useCart();
+  const lastScrollY = useRef(0);
+  const isScrolling = useRef(false);
 
   const handlePressIn = () => {
     Animated.spring(scaleAnim, { toValue: 0.98, useNativeDriver: true }).start();
@@ -155,49 +165,89 @@ function Header() {
     Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true }).start();
   };
 
+  // Função para lidar com scroll
+  const handleScroll = (event) => {
+    const currentScrollY = event.nativeEvent.contentOffset.y;
+    const scrollDelta = currentScrollY - lastScrollY.current;
+
+    // Se scrollou para baixo mais de 5px, esconde o header
+    if (scrollDelta > 5 && !isScrolling.current) {
+      isScrolling.current = true;
+      Animated.timing(headerTranslateY, {
+        toValue: -200, // Esconde o header
+        duration: 300,
+        useNativeDriver: true,
+      }).start(() => {
+        isScrolling.current = false;
+      });
+    }
+    // Se scrollou para cima mais de 5px, mostra o header
+    else if (scrollDelta < -5 && isScrolling.current === false) {
+      isScrolling.current = true;
+      Animated.timing(headerTranslateY, {
+        toValue: 0, // Mostra o header
+        duration: 300,
+        useNativeDriver: true,
+      }).start(() => {
+        isScrolling.current = false;
+      });
+    }
+
+    lastScrollY.current = currentScrollY;
+  };
+
+  // Passar o handler para o contexto
+  useEffect(() => {
+    if (onScrollHandler) {
+      onScrollHandler(handleScroll);
+    }
+  }, [onScrollHandler]);
+
   return (
     <>
-      <SafeAreaView style={s.headerSafe} edges={['top']}>
-        <View style={s.headerRow}>
-          <View style={s.logoRow}>
-            <View style={s.logoBg}>
-              <Text style={s.logoText}>🍟</Text>
+      <Animated.View style={[s.headerSafeAnimated, { transform: [{ translateY: headerTranslateY }] }]}>
+        <SafeAreaView style={s.headerSafe} edges={['top']}>
+          <View style={s.headerRow}>
+            <View style={s.logoRow}>
+              <View style={s.logoBg}>
+                <Text style={s.logoText}>🍟</Text>
+              </View>
+              <View>
+                <Text style={s.logoTitle}>Batata Top</Text>
+                <Text style={s.logoSubtitle}>Iacanga - SP</Text>
+              </View>
             </View>
-            <View>
-              <Text style={s.logoTitle}>Batata Top</Text>
-              <Text style={s.logoSubtitle}>Iacanga - SP</Text>
-            </View>
+            <Pressable style={s.cartBtn} onPress={() => router.push('/cart')}>
+              <Ionicons name="cart-outline" size={26} color="#FFFFFF" />
+              {totalItems > 0 && (
+                <View style={s.cartBadge}>
+                  <Text style={s.cartBadgeText}>{totalItems}</Text>
+                </View>
+              )}
+            </Pressable>
           </View>
-          <Pressable style={s.cartBtn} onPress={() => router.push('/cart')}>
-            <Ionicons name="cart-outline" size={26} color="#FFFFFF" />
-            {totalItems > 0 && (
-              <View style={s.cartBadge}>
-                <Text style={s.cartBadgeText}>{totalItems}</Text>
-              </View>
-            )}
-          </Pressable>
-        </View>
 
-        <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-          <Pressable
-            style={s.addressSelector}
-            onPress={() => setAddressModalVisible(true)}
-            onPressIn={handlePressIn}
-            onPressOut={handlePressOut}
-          >
-            <View style={s.addressSelectorLeft}>
-              <Ionicons name="location-outline" size={20} color="#EA1D2C" />
-              <View style={s.addressSelectorText}>
-                <Text style={s.addressSelectorLabel}>Entregando em</Text>
-                <Text style={s.addressSelectorValue} numberOfLines={1}>
-                  {selectedAddress.address}
-                </Text>
+          <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+            <Pressable
+              style={s.addressSelector}
+              onPress={() => setAddressModalVisible(true)}
+              onPressIn={handlePressIn}
+              onPressOut={handlePressOut}
+            >
+              <View style={s.addressSelectorLeft}>
+                <Ionicons name="location-outline" size={20} color="#EA1D2C" />
+                <View style={s.addressSelectorText}>
+                  <Text style={s.addressSelectorLabel}>Entregando em</Text>
+                  <Text style={s.addressSelectorValue} numberOfLines={1}>
+                    {selectedAddress.address}
+                  </Text>
+                </View>
               </View>
-            </View>
-            <Ionicons name="chevron-down" size={20} color="#EA1D2C" />
-          </Pressable>
-        </Animated.View>
-      </SafeAreaView>
+              <Ionicons name="chevron-down" size={20} color="#EA1D2C" />
+            </Pressable>
+          </Animated.View>
+        </SafeAreaView>
+      </Animated.View>
 
       <AddressModal
         visible={addressModalVisible}
@@ -253,12 +303,18 @@ function BottomTabBar() {
 
 /* ============ LAYOUT ROOT ============ */
 export default function RootLayout() {
+  const scrollHandlerRef = useRef(null);
+
+  const setScrollHandler = (handler) => {
+    scrollHandlerRef.current = handler;
+  };
+
   return (
     <CartProvider>
       <SafeAreaProvider>
         <StatusBar backgroundColor="#EA1D2C" barStyle="light-content" />
         <View style={{ flex: 1 }}>
-          <Header />
+          <Header onScrollHandler={setScrollHandler} />
           <View style={{ flex: 1 }}>
             <Stack
               screenOptions={{
@@ -278,6 +334,9 @@ export default function RootLayout() {
 /* ============ STYLES ============ */
 const s = StyleSheet.create({
   /* Header */
+  headerSafeAnimated: {
+    overflow: 'hidden',
+  },
   headerSafe: {
     backgroundColor: '#EA1D2C',
   },
@@ -499,7 +558,7 @@ const s = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#EA1D2C',
     borderRadius: 14,
-    backgroundColor: '#FFF5F0',
+    backgroundColor: 'rgba(234, 29, 44, 0.05)',
   },
   addAddressBtnText: {
     color: '#EA1D2C',
@@ -508,27 +567,21 @@ const s = StyleSheet.create({
   },
   addressForm: {
     marginVertical: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#ECE6DC',
+    gap: 12,
   },
   addressInput: {
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#ECE6DC',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 14,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     color: '#1A1A1A',
-    marginBottom: 12,
-    backgroundColor: '#F8F9FA',
+    fontSize: 14,
   },
   formButtons: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 12,
   },
   formBtnCancel: {
     flex: 1,
@@ -540,7 +593,7 @@ const s = StyleSheet.create({
   },
   formBtnCancelText: {
     color: '#6B6B6B',
-    fontWeight: '700',
+    fontWeight: '600',
     fontSize: 14,
   },
   formBtnSave: {

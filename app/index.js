@@ -21,7 +21,7 @@ function PressableScale({ children, onPress, style }) {
   const handlePressIn = () => {
     Animated.timing(scale, {
       toValue: 0.95,
-      duration: ANIMATIONS.fast,
+      duration: 200,
       useNativeDriver: true,
     }).start();
   };
@@ -29,7 +29,7 @@ function PressableScale({ children, onPress, style }) {
   const handlePressOut = () => {
     Animated.timing(scale, {
       toValue: 1,
-      duration: ANIMATIONS.normal,
+      duration: 300,
       useNativeDriver: true,
     }).start();
   };
@@ -138,6 +138,7 @@ export default function Home() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [produtosDestaque, setProdutosDestaque] = useState([]);
+  const scrollHandlerRef = useRef(null);
 
   useEffect(() => {
     // Simular carregamento de dados
@@ -147,12 +148,25 @@ export default function Home() {
     }, 300);
   }, []);
 
+  const handleScroll = (event) => {
+    if (scrollHandlerRef.current) {
+      scrollHandlerRef.current(event);
+    }
+  };
+
+  // Registrar o handler na montagem
+  useEffect(() => {
+    scrollHandlerRef.current = global.headerScrollHandler || null;
+  }, []);
+
   return (
     <View style={s.container}>
       <ScrollView
         style={s.scroll}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: SPACING[10] }}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
       >
         {/* ===== HERO SECTION ===== */}
         <View style={s.hero}>
@@ -498,11 +512,11 @@ const s = StyleSheet.create({
   addBtn: {
     backgroundColor: COLORS.primary,
     borderRadius: RADIUS.lg,
-    width: 48,
-    height: 48,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    ...SHADOWS.glow,
+    ...SHADOWS.md,
   },
 
   // ===== BANNER PROMOCIONAL =====
@@ -510,36 +524,37 @@ const s = StyleSheet.create({
     marginHorizontal: SPACING[6],
     marginTop: SPACING[8],
     marginBottom: SPACING[4],
-    paddingHorizontal: SPACING[5],
-    paddingVertical: SPACING[5],
-    backgroundColor: 'rgba(230, 57, 70, 0.1)',
+    backgroundColor: 'rgba(230, 57, 70, 0.15)',
     borderRadius: RADIUS.xl,
     borderWidth: 1,
     borderColor: COLORS.borderAccent,
+    paddingHorizontal: SPACING[4],
+    paddingVertical: SPACING[6],
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
   promoBannerContent: {
     flex: 1,
+    gap: SPACING[2],
   },
   promoBannerTitle: {
     color: COLORS.text,
-    fontWeight: '700',
-    fontSize: TYPOGRAPHY.sizes.base,
+    fontWeight: '800',
+    fontSize: TYPOGRAPHY.sizes.lg,
   },
   promoBannerDesc: {
     color: COLORS.textSecondary,
     fontSize: TYPOGRAPHY.sizes.sm,
-    marginTop: SPACING[1],
-    marginBottom: SPACING[3],
+    lineHeight: 20,
   },
   promoBannerBtn: {
     backgroundColor: COLORS.primary,
     borderRadius: RADIUS.md,
-    paddingHorizontal: SPACING[3],
     paddingVertical: SPACING[2],
+    paddingHorizontal: SPACING[3],
     alignSelf: 'flex-start',
+    marginTop: SPACING[2],
   },
   promoBannerBtnText: {
     color: COLORS.text,
@@ -553,12 +568,11 @@ const s = StyleSheet.create({
   // ===== LOADER =====
   loaderContainer: {
     alignItems: 'center',
-    justifyContent: 'center',
     paddingVertical: SPACING[12],
     gap: SPACING[3],
   },
   loaderText: {
     color: COLORS.textMuted,
-    fontSize: TYPOGRAPHY.sizes.base,
+    fontSize: TYPOGRAPHY.sizes.sm,
   },
 });

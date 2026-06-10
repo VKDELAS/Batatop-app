@@ -9,7 +9,7 @@ import {
   TextInput,
   Image,
 } from 'react-native';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS, ANIMATIONS } from '../constants/theme';
@@ -21,7 +21,7 @@ function PressableScale({ children, onPress, style }) {
   const handlePressIn = () => {
     Animated.timing(scale, {
       toValue: 0.95,
-      duration: ANIMATIONS.fast,
+      duration: 200,
       useNativeDriver: true,
     }).start();
   };
@@ -29,7 +29,7 @@ function PressableScale({ children, onPress, style }) {
   const handlePressOut = () => {
     Animated.timing(scale, {
       toValue: 1,
-      duration: ANIMATIONS.normal,
+      duration: 300,
       useNativeDriver: true,
     }).start();
   };
@@ -118,6 +118,7 @@ export default function Cardapio() {
   const [categoriaAtiva, setCategoriaAtiva] = useState('Todas');
   const [searchQuery, setSearchQuery] = useState('');
   const router = useRouter();
+  const scrollHandlerRef = useRef(null);
 
   const categorias = getCategorias();
 
@@ -127,6 +128,17 @@ export default function Cardapio() {
   if (searchQuery.trim()) {
     produtosFiltrados = buscarProdutos(searchQuery);
   }
+
+  const handleScroll = (event) => {
+    if (scrollHandlerRef.current) {
+      scrollHandlerRef.current(event);
+    }
+  };
+
+  // Registrar o handler na montagem
+  useEffect(() => {
+    scrollHandlerRef.current = global.headerScrollHandler || null;
+  }, []);
 
   return (
     <View style={s.container}>
@@ -185,6 +197,8 @@ export default function Cardapio() {
         renderItem={({ item }) => <ProdutoCard produto={item} />}
         contentContainerStyle={s.listaContent}
         showsVerticalScrollIndicator={false}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
         ListEmptyComponent={() => (
           <View style={s.empty}>
             <Ionicons name="search" size={48} color={COLORS.primary} />

@@ -79,7 +79,7 @@ export default function Produto() {
         <View style={s.content}>
           <View style={s.titleRow}>
             <Text style={s.nome}>{produto.nome}</Text>
-            <Text style={s.preco}>{produto.preco}</Text>
+            <Text style={s.preco}>{produto.precoFormatado}</Text>
           </View>
 
           <View style={s.divider} />

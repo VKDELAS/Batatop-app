@@ -1,7 +1,19 @@
-import { View, Text, FlatList, StyleSheet, Animated, Pressable, ActivityIndicator, TextInput } from 'react-native';
+import {
+  View,
+  Text,
+  FlatList,
+  StyleSheet,
+  Animated,
+  Pressable,
+  ActivityIndicator,
+  TextInput,
+  Image,
+} from 'react-native';
 import { useState, useRef } from 'react';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS, ANIMATIONS } from '../constants/theme';
+import { getProdutosPorCategoria, getCategorias, buscarProdutos, PRODUTOS } from '../data/produtos';
 
 function PressableScale({ children, onPress, style }) {
   const scale = useRef(new Animated.Value(1)).current;
@@ -9,7 +21,7 @@ function PressableScale({ children, onPress, style }) {
   const handlePressIn = () => {
     Animated.timing(scale, {
       toValue: 0.95,
-      duration: 100,
+      duration: ANIMATIONS.fast,
       useNativeDriver: true,
     }).start();
   };
@@ -17,7 +29,7 @@ function PressableScale({ children, onPress, style }) {
   const handlePressOut = () => {
     Animated.timing(scale, {
       toValue: 1,
-      duration: 150,
+      duration: ANIMATIONS.normal,
       useNativeDriver: true,
     }).start();
   };
@@ -36,74 +48,62 @@ function PressableScale({ children, onPress, style }) {
   );
 }
 
-const PRODUTOS = [
-  {
-    id: '1',
-    nome: 'Batata de Hot Dog',
-    descricao: 'Batata recheada, molho especial de salsicha, requeijão cremoso, mussarela, bacon, batata palha',
-    preco: 'R$ 25,99',
-    categoria: 'Batatas',
-  },
-  {
-    id: '2',
-    nome: 'Brócolis com Bacon',
-    descricao: 'Batata recheada, molho especial com brócolis, bacon, requeijão, mussarela e batata palha',
-    preco: 'R$ 26,99',
-    categoria: 'Batatas',
-  },
-  {
-    id: '3',
-    nome: 'Calabresa Especial',
-    descricao: 'Batata com molho cremoso de calabresa, requeijão cremoso, bacon e batata palha',
-    preco: 'R$ 25,99',
-    categoria: 'Batatas',
-  },
-  {
-    id: '4',
-    nome: 'Bolonhesa',
-    descricao: 'Macarrão, molho vermelho com carne moída e queijo ralado',
-    preco: 'R$ 27,99',
-    categoria: 'Macarrão',
-  },
-  {
-    id: '5',
-    nome: 'Brócolis com Bacon Macarrão',
-    descricao: 'Macarrão e molho com brócolis, bacon e queijo ralado',
-    preco: 'R$ 27,99',
-    categoria: 'Macarrão',
-  },
-  {
-    id: '6',
-    nome: 'Filé ao Alho Macarrão',
-    descricao: 'Macarrão, molho especial de filé mignon, queijo ralado e alho frito',
-    preco: 'R$ 29,99',
-    categoria: 'Macarrão',
-  },
-];
-
+/**
+ * Card de Produto com Imagem Real
+ */
 function ProdutoCard({ produto }) {
   const router = useRouter();
+  const [imageLoaded, setImageLoaded] = useState(false);
 
   return (
     <PressableScale
       style={s.card}
       onPress={() => router.push(`/produto/${produto.id}`)}
     >
-      <View style={s.cardImg}>
-        <Text style={s.cardImgPlaceholder}>🍟</Text>
+      {/* Imagem com Skeleton Loading */}
+      <View style={s.cardImgContainer}>
+        {!imageLoaded && (
+          <View style={[s.cardImg, s.skeleton]}>
+            <ActivityIndicator size="large" color={COLORS.primary} />
+          </View>
+        )}
+        <Image
+          source={{ uri: produto.imagem }}
+          style={[s.cardImg, { display: imageLoaded ? 'flex' : 'none' }]}
+          onLoad={() => setImageLoaded(true)}
+        />
+
+        {/* Badge de Avaliação */}
+        <View style={s.ratingBadge}>
+          <Ionicons name="star" size={12} color={COLORS.primary} />
+          <Text style={s.ratingText}>{produto.avaliacoes}</Text>
+        </View>
       </View>
+
+      {/* Informações */}
       <View style={s.cardInfo}>
         <View style={s.cardHeader}>
-          <Text style={s.cardNome} numberOfLines={2}>{produto.nome}</Text>
-          <Text style={s.cardDesc} numberOfLines={2}>{produto.descricao}</Text>
+          <Text style={s.cardNome} numberOfLines={2}>
+            {produto.nome}
+          </Text>
+          <Text style={s.cardDesc} numberOfLines={2}>
+            {produto.descricao}
+          </Text>
         </View>
+
         <View style={s.cardFooter}>
-          <Text style={s.cardPreco}>{produto.preco}</Text>
+          <View>
+            <Text style={s.cardPreco}>{produto.precoFormatado}</Text>
+            <View style={s.tempoContainer}>
+              <Ionicons name="time" size={12} color={COLORS.textMuted} />
+              <Text style={s.cardTempo}>{produto.tempo} min</Text>
+            </View>
+          </View>
           <PressableScale
             style={s.addBtn}
             onPress={() => router.push(`/produto/${produto.id}`)}
           >
-            <Ionicons name="add-circle" size={22} color="#FFFFFF" />
+            <Ionicons name="add-circle" size={28} color={COLORS.primary} />
           </PressableScale>
         </View>
       </View>
@@ -111,59 +111,57 @@ function ProdutoCard({ produto }) {
   );
 }
 
+/**
+ * Tela de Cardápio
+ */
 export default function Cardapio() {
   const [categoriaAtiva, setCategoriaAtiva] = useState('Todas');
   const [searchQuery, setSearchQuery] = useState('');
   const router = useRouter();
 
-  const categoriasDisponiveis = [...new Set(PRODUTOS.map((p) => p.categoria))];
-  const todasCategorias = ['Todas', ...categoriasDisponiveis];
-  
-  let produtosFiltrados = categoriaAtiva === 'Todas' 
-    ? PRODUTOS 
-    : PRODUTOS.filter((p) => p.categoria === categoriaAtiva);
+  const categorias = getCategorias();
+
+  // Filtrar produtos por categoria e busca
+  let produtosFiltrados = getProdutosPorCategoria(categoriaAtiva);
 
   if (searchQuery.trim()) {
-    produtosFiltrados = produtosFiltrados.filter((p) =>
-      p.nome.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.descricao.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    produtosFiltrados = buscarProdutos(searchQuery);
   }
 
   return (
     <View style={s.container}>
-      {/* PAGE HEADER */}
+      {/* ===== HEADER ===== */}
       <View style={s.pageHeader}>
         <View style={s.headerTop}>
           <PressableScale onPress={() => router.back()} style={s.backBtn}>
-            <Ionicons name="chevron-back" size={24} color="#C8321A" />
+            <Ionicons name="chevron-back" size={24} color={COLORS.primary} />
           </PressableScale>
           <Text style={s.titulo}>Cardápio</Text>
           <View style={{ width: 24 }} />
         </View>
 
-        {/* SEARCH BAR */}
+        {/* Search Bar */}
         <View style={s.searchContainer}>
-          <Ionicons name="search" size={20} color="#A3A3A3" style={s.searchIcon} />
+          <Ionicons name="search" size={18} color={COLORS.textMuted} style={s.searchIcon} />
           <TextInput
             style={s.searchInput}
             placeholder="Buscar produtos..."
-            placeholderTextColor="#A3A3A3"
+            placeholderTextColor={COLORS.textMuted}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
           {searchQuery.length > 0 && (
             <Pressable onPress={() => setSearchQuery('')}>
-              <Ionicons name="close-circle" size={20} color="#A3A3A3" />
+              <Ionicons name="close-circle" size={18} color={COLORS.textMuted} />
             </Pressable>
           )}
         </View>
       </View>
 
-      {/* FILTER PILLS */}
+      {/* ===== FILTROS ===== */}
       <View style={s.filtrosContainer}>
         <View style={s.filtrosContent}>
-          {todasCategorias.map((cat) => {
+          {categorias.map((cat) => {
             const ativo = cat === categoriaAtiva;
             return (
               <PressableScale
@@ -180,18 +178,16 @@ export default function Cardapio() {
         </View>
       </View>
 
-      {/* PRODUCTS LIST */}
+      {/* ===== LISTA DE PRODUTOS ===== */}
       <FlatList
         data={produtosFiltrados}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <ProdutoCard produto={item} />
-        )}
+        renderItem={({ item }) => <ProdutoCard produto={item} />}
         contentContainerStyle={s.listaContent}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={() => (
           <View style={s.empty}>
-            <Ionicons name="search" size={48} color="#C8321A" />
+            <Ionicons name="search" size={48} color={COLORS.primary} />
             <Text style={s.emptyTitle}>Nenhum produto encontrado</Text>
             <Text style={s.emptyDesc}>Tente outra busca ou categoria.</Text>
           </View>
@@ -204,145 +200,170 @@ export default function Cardapio() {
 const s = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9F5F0',
+    backgroundColor: COLORS.background,
   },
+
+  // ===== HEADER =====
   pageHeader: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 16,
-    backgroundColor: '#FFFFFF',
+    paddingHorizontal: SPACING[5],
+    paddingTop: SPACING[3],
+    paddingBottom: SPACING[4],
+    backgroundColor: COLORS.backgroundElevated,
     borderBottomWidth: 1,
-    borderBottomColor: '#ECE6DC',
+    borderBottomColor: COLORS.border,
   },
   headerTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: SPACING[4],
   },
   backBtn: {
-    padding: 4,
+    padding: SPACING[1],
   },
   titulo: {
-    color: '#1A1A1A',
+    color: COLORS.text,
     fontWeight: '800',
-    fontSize: 24,
+    fontSize: TYPOGRAPHY.sizes['2xl'],
     letterSpacing: -0.5,
     flex: 1,
     textAlign: 'center',
   },
+
+  // ===== SEARCH BAR =====
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    backgroundColor: '#F9F5F0',
-    borderRadius: 12,
+    paddingHorizontal: SPACING[3],
+    paddingVertical: SPACING[2],
+    backgroundColor: COLORS.backgroundCard,
+    borderRadius: RADIUS.lg,
     borderWidth: 1,
-    borderColor: '#ECE6DC',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
+    borderColor: COLORS.border,
+    ...SHADOWS.sm,
   },
   searchIcon: {
-    marginRight: 10,
+    marginRight: SPACING[2],
   },
   searchInput: {
     flex: 1,
-    fontSize: 14,
-    color: '#1A1A1A',
+    fontSize: TYPOGRAPHY.sizes.base,
+    color: COLORS.text,
     paddingVertical: 0,
   },
+
+  // ===== FILTROS =====
   filtrosContainer: {
-    paddingVertical: 12,
-    backgroundColor: '#FFFFFF',
+    paddingVertical: SPACING[3],
+    backgroundColor: COLORS.backgroundElevated,
     borderBottomWidth: 1,
-    borderBottomColor: '#ECE6DC',
+    borderBottomColor: COLORS.border,
   },
   filtrosContent: {
-    paddingHorizontal: 20,
-    gap: 10,
+    paddingHorizontal: SPACING[5],
+    gap: SPACING[2],
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
   filtroBtn: {
-    paddingHorizontal: 18,
-    paddingVertical: 9,
-    borderRadius: 20,
+    paddingHorizontal: SPACING[4],
+    paddingVertical: SPACING[2],
+    borderRadius: RADIUS.full,
     borderWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
+    ...SHADOWS.sm,
   },
   filtroBtnAtivo: {
-    backgroundColor: '#C8321A',
-    borderColor: '#C8321A',
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
   },
   filtroBtnInativo: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#ECE6DC',
+    backgroundColor: COLORS.backgroundCard,
+    borderColor: COLORS.border,
   },
   filtroText: {
-    fontSize: 13,
+    fontSize: TYPOGRAPHY.sizes.sm,
     fontWeight: '700',
   },
   filtroTextAtivo: {
-    color: '#FFFFFF',
+    color: COLORS.text,
   },
   filtroTextInativo: {
-    color: '#6B6B6B',
+    color: COLORS.textMuted,
   },
+
+  // ===== LISTA =====
   listaContent: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    gap: 14,
-    paddingBottom: 40,
+    paddingHorizontal: SPACING[5],
+    paddingVertical: SPACING[4],
+    gap: SPACING[3],
+    paddingBottom: SPACING[10],
   },
+
+  // ===== CARD DE PRODUTO =====
   card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    backgroundColor: COLORS.backgroundCard,
+    borderRadius: RADIUS.lg,
     borderWidth: 1,
-    borderColor: '#ECE6DC',
+    borderColor: COLORS.border,
     flexDirection: 'row',
     overflow: 'hidden',
-    height: 132,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
+    height: 140,
+    ...SHADOWS.md,
+  },
+
+  // ===== IMAGEM =====
+  cardImgContainer: {
+    position: 'relative',
+    width: 140,
+    height: '100%',
   },
   cardImg: {
-    width: 132,
+    width: '100%',
     height: '100%',
-    backgroundColor: '#FFF5F0',
+    backgroundColor: COLORS.backgroundElevated,
+  },
+  skeleton: {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cardImgPlaceholder: {
-    fontSize: 56,
+  ratingBadge: {
+    position: 'absolute',
+    top: SPACING[2],
+    right: SPACING[2],
+    backgroundColor: 'rgba(15, 20, 25, 0.8)',
+    borderRadius: RADIUS.md,
+    paddingHorizontal: SPACING[2],
+    paddingVertical: SPACING[1],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING[1],
+    borderWidth: 1,
+    borderColor: COLORS.borderAccent,
   },
+  ratingText: {
+    color: COLORS.primary,
+    fontWeight: '700',
+    fontSize: TYPOGRAPHY.sizes.xs,
+  },
+
+  // ===== INFO =====
   cardInfo: {
     flex: 1,
-    padding: 14,
+    padding: SPACING[3],
     justifyContent: 'space-between',
   },
   cardHeader: {
-    gap: 4,
+    gap: SPACING[1],
   },
   cardNome: {
-    color: '#1A1A1A',
-    fontWeight: 'bold',
-    fontSize: 15,
-    lineHeight: 18,
+    color: COLORS.text,
+    fontWeight: '700',
+    fontSize: TYPOGRAPHY.sizes.base,
+    lineHeight: 20,
   },
   cardDesc: {
-    color: '#6B6B6B',
-    fontSize: 12,
+    color: COLORS.textMuted,
+    fontSize: TYPOGRAPHY.sizes.xs,
     lineHeight: 16,
   },
   cardFooter: {
@@ -351,35 +372,42 @@ const s = StyleSheet.create({
     justifyContent: 'space-between',
   },
   cardPreco: {
-    color: '#C8321A',
+    color: COLORS.primary,
     fontWeight: '800',
-    fontSize: 16,
+    fontSize: TYPOGRAPHY.sizes.lg,
+  },
+  tempoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING[1],
+    marginTop: SPACING[1],
+  },
+  cardTempo: {
+    color: COLORS.textMuted,
+    fontSize: TYPOGRAPHY.sizes.xs,
   },
   addBtn: {
-    backgroundColor: '#C8321A',
-    borderRadius: 11,
+    backgroundColor: 'transparent',
+    borderRadius: RADIUS.lg,
     width: 40,
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#C8321A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3,
-    elevation: 2,
   },
+
+  // ===== EMPTY STATE =====
   empty: {
     alignItems: 'center',
-    paddingVertical: 80,
-    gap: 12,
+    paddingVertical: SPACING[16],
+    gap: SPACING[3],
   },
   emptyTitle: {
-    color: '#1A1A1A',
-    fontWeight: 'bold',
-    fontSize: 16,
+    color: COLORS.text,
+    fontWeight: '700',
+    fontSize: TYPOGRAPHY.sizes.base,
   },
   emptyDesc: {
-    color: '#6B6B6B',
-    fontSize: 13,
+    color: COLORS.textMuted,
+    fontSize: TYPOGRAPHY.sizes.sm,
   },
 });

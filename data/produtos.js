@@ -1,155 +1,176 @@
-import { supabase } from '../utils/supabase';
+/**
+ * Banco de Dados Centralizado de Produtos
+ * Todas as telas usam este arquivo como fonte única de verdade
+ */
 
-// Local official fallback products if Supabase fails or is offline
-export const produtosLocais = [
+export const PRODUTOS = [
   {
     id: '1',
-    categoria: 'Batatas Recheadas',
     nome: 'Batata de Hot Dog',
     descricao: 'Batata recheada, molho especial de salsicha, requeijão cremoso, mussarela, bacon, batata palha',
-    preco: 'R$ 25,99',
-    precoNum: 25.99,
+    descricaoLonga: 'Nossa famosa batata recheada com um delicioso molho especial de salsicha, requeijão cremoso derretido, mussarela fresca, bacon crocante e uma generosa porção de batata palha. Perfeita para quem ama sabores intensos!',
+    preco: 25.99,
+    precoFormatado: 'R$ 25,99',
+    categoria: 'Batatas',
+    imagem: 'https://images.unsplash.com/photo-1585238341710-4b4e6cefc688?w=500&h=500&fit=crop',
     ranking: 1,
+    avaliacoes: 4.8,
+    avaliacoesCount: 342,
+    tempo: '15-20',
     destaque: true,
-    imagem: 'https://batatop.vercel.app/products/batata-hotdog.jpg',
   },
   {
     id: '2',
-    categoria: 'Batatas Recheadas',
     nome: 'Brócolis com Bacon',
     descricao: 'Batata recheada, molho especial com brócolis, bacon, requeijão, mussarela e batata palha',
-    preco: 'R$ 26,99',
-    precoNum: 26.99,
+    descricaoLonga: 'Uma opção mais leve e saudável! Batata recheada com brócolis fresco, bacon crocante, molho especial cremoso, requeijão e mussarela. Perfeito para quem quer algo diferente e nutritivo.',
+    preco: 26.99,
+    precoFormatado: 'R$ 26,99',
+    categoria: 'Batatas',
+    imagem: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd64b11?w=500&h=500&fit=crop',
     ranking: 2,
+    avaliacoes: 4.7,
+    avaliacoesCount: 289,
+    tempo: '15-20',
     destaque: true,
-    imagem: 'https://batatop.vercel.app/products/brocolis-com-bacon.jpg',
   },
   {
     id: '3',
-    categoria: 'Batatas Recheadas',
     nome: 'Calabresa Especial',
     descricao: 'Batata com molho cremoso de calabresa, requeijão cremoso, bacon e batata palha',
-    preco: 'R$ 25,99',
-    precoNum: 25.99,
+    descricaoLonga: 'Para os amantes de calabresa! Batata recheada com nosso molho cremoso de calabresa artesanal, requeijão cremoso, bacon crocante e batata palha. Uma explosão de sabor em cada garfada!',
+    preco: 25.99,
+    precoFormatado: 'R$ 25,99',
+    categoria: 'Batatas',
+    imagem: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=500&h=500&fit=crop',
     ranking: 3,
+    avaliacoes: 4.9,
+    avaliacoesCount: 412,
+    tempo: '15-20',
     destaque: true,
-    imagem: 'https://batatop.vercel.app/products/calabresa-especial.jpg',
   },
   {
     id: '4',
-    categoria: 'Massas',
     nome: 'Bolonhesa',
     descricao: 'Macarrão, molho vermelho com carne moída e queijo ralado',
-    preco: 'R$ 27,99',
-    precoNum: 27.99,
-    ranking: null,
+    descricaoLonga: 'Clássico italiano em forma de batata! Macarrão al dente com nosso molho bolonhesa caseiro feito com carne moída fresca, tomate natural e queijo ralado. Uma combinação irresistível!',
+    preco: 27.99,
+    precoFormatado: 'R$ 27,99',
+    categoria: 'Macarrão',
+    imagem: 'https://images.unsplash.com/photo-1621996346565-e3dbc646d9a9?w=500&h=500&fit=crop',
+    ranking: 4,
+    avaliacoes: 4.6,
+    avaliacoesCount: 198,
+    tempo: '18-23',
     destaque: false,
-    imagem: 'https://batatop.vercel.app/products/macarrao-bolonhesa.jpg',
   },
   {
     id: '5',
-    categoria: 'Massas',
-    nome: 'Brócolis com Bacon',
+    nome: 'Brócolis com Bacon Macarrão',
     descricao: 'Macarrão e molho com brócolis, bacon e queijo ralado',
-    preco: 'R$ 27,99',
-    precoNum: 27.99,
-    ranking: null,
+    descricaoLonga: 'Macarrão fresco com brócolis crocante, bacon frito, molho cremoso e queijo ralado. Uma opção leve e deliciosa para quem prefere algo mais vegetal.',
+    preco: 27.99,
+    precoFormatado: 'R$ 27,99',
+    categoria: 'Macarrão',
+    imagem: 'https://images.unsplash.com/photo-1621996346565-e3dbc646d9a9?w=500&h=500&fit=crop',
+    ranking: 5,
+    avaliacoes: 4.5,
+    avaliacoesCount: 156,
+    tempo: '18-23',
     destaque: false,
-    imagem: 'https://batatop.vercel.app/products/macarrao-brocolis-bacon.jpg',
   },
   {
     id: '6',
-    categoria: 'Massas',
-    nome: 'Filé ao Alho',
+    nome: 'Filé ao Alho Macarrão',
     descricao: 'Macarrão, molho especial de filé mignon, queijo ralado e alho frito',
-    preco: 'R$ 29,99',
-    precoNum: 29.99,
-    ranking: null,
+    descricaoLonga: 'Luxo em forma de batata! Macarrão premium com molho especial de filé mignon, alho frito crocante, queijo ralado e um toque de manteiga. Perfeito para ocasiões especiais!',
+    preco: 29.99,
+    precoFormatado: 'R$ 29,99',
+    categoria: 'Macarrão',
+    imagem: 'https://images.unsplash.com/photo-1612874742237-6526221fcf4f?w=500&h=500&fit=crop',
+    ranking: 6,
+    avaliacoes: 4.9,
+    avaliacoesCount: 267,
+    tempo: '20-25',
     destaque: false,
-    imagem: 'https://batatop.vercel.app/products/macarrao-file-ao-alho.jpg',
+  },
+  {
+    id: '7',
+    nome: 'Batata Cheddar',
+    descricao: 'Batata recheada com cheddar derretido, bacon e cebola roxa',
+    descricaoLonga: 'Batata recheada com queijo cheddar derretido, bacon crocante, cebola roxa caramelizada e um toque de molho especial. Irresistível!',
+    preco: 26.99,
+    precoFormatado: 'R$ 26,99',
+    categoria: 'Batatas',
+    imagem: 'https://images.unsplash.com/photo-1585238341710-4b4e6cefc688?w=500&h=500&fit=crop',
+    ranking: 7,
+    avaliacoes: 4.7,
+    avaliacoesCount: 223,
+    tempo: '15-20',
+    destaque: false,
+  },
+  {
+    id: '8',
+    nome: 'Batata Vegetariana',
+    descricao: 'Batata recheada com legumes grelhados, queijo e molho pesto',
+    descricaoLonga: 'Para os vegetarianos! Batata recheada com legumes grelhados (abobrinha, berinjela, pimentão), queijo mozzarela e molho pesto caseiro. Saudável e delicioso!',
+    preco: 24.99,
+    precoFormatado: 'R$ 24,99',
+    categoria: 'Batatas',
+    imagem: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd64b11?w=500&h=500&fit=crop',
+    ranking: 8,
+    avaliacoes: 4.6,
+    avaliacoesCount: 145,
+    tempo: '15-20',
+    destaque: false,
   },
 ];
 
-// Helper to map DB categories to client display labels
-const mappingCategorias = {
-  batata: 'Batatas Recheadas',
-  macarrao: 'Massas',
-  bebida: 'Bebidas',
-};
-
-// Global in-memory cache to share fetched Supabase products across screens
-let productsCache = [];
-
-export function setProductsCache(list) {
-  productsCache = list;
-}
-
-export function getProductsCache() {
-  return productsCache.length > 0 ? productsCache : null;
-}
-
+/**
+ * Obter produto por ID
+ */
 export function getProdutoById(id) {
-  // Search in memory cache first, then in fallback list
-  const cached = productsCache.find((p) => p.id === id);
-  if (cached) return cached;
-  return produtosLocais.find((p) => p.id === id);
+  return PRODUTOS.find((p) => p.id === id);
 }
 
-export async function fetchSupabaseProducts() {
-  try {
-    const { data, error } = await supabase
-      .from('products')
-      .select('*')
-      .eq('available', true);
+/**
+ * Obter produtos por categoria
+ */
+export function getProdutosPorCategoria(categoria) {
+  if (categoria === 'Todas') return PRODUTOS;
+  return PRODUTOS.filter((p) => p.categoria === categoria);
+}
 
-    if (error) throw error;
-    if (!data || data.length === 0) return [];
+/**
+ * Obter categorias únicas
+ */
+export function getCategorias() {
+  const categorias = [...new Set(PRODUTOS.map((p) => p.categoria))];
+  return ['Todas', ...categorias];
+}
 
-    const mapped = data.map((item) => {
-      let ranking = null;
-      let destaque = false;
+/**
+ * Buscar produtos por termo
+ */
+export function buscarProdutos(termo) {
+  const termoLower = termo.toLowerCase();
+  return PRODUTOS.filter(
+    (p) =>
+      p.nome.toLowerCase().includes(termoLower) ||
+      p.descricao.toLowerCase().includes(termoLower)
+  );
+}
 
-      // Match site rankings dynamically by name
-      if (item.name === 'Batata de Hot Dog') {
-        ranking = 1;
-        destaque = true;
-      } else if (item.name === 'Brócolis com Bacon' && item.category === 'batata') {
-        ranking = 2;
-        destaque = true;
-      } else if (item.name === 'Calabresa Especial') {
-        ranking = 3;
-        destaque = true;
-      }
+/**
+ * Obter produtos em destaque
+ */
+export function getProdutosDestaque() {
+  return PRODUTOS.filter((p) => p.destaque).slice(0, 3);
+}
 
-      // Ensure the image URL is absolute (points to your web host)
-      const image = item.image_url.startsWith('/')
-        ? `https://batatop.vercel.app${item.image_url}`
-        : item.image_url;
-
-      // Format price to local BRL currency format
-      const priceVal = parseFloat(item.price) || 0;
-      const precoStr = `R$ ${priceVal.toFixed(2).replace('.', ',')}`;
-
-      return {
-        id: item.id.toString(),
-        categoria: mappingCategorias[item.category] || item.category,
-        nome: item.name,
-        descricao: item.description,
-        preco: precoStr,
-        precoNum: priceVal,
-        ranking,
-        destaque,
-        imagem: image,
-      };
-    });
-
-    // Save in cache
-    productsCache = mapped;
-    return mapped;
-  } catch (err) {
-    console.warn('Erro ao consultar Supabase. Usando fallback local:', err);
-    // If the call fails, we populate the cache with local data so the app continues working offline
-    productsCache = produtosLocais;
-    return produtosLocais;
-  }
+/**
+ * Obter produtos mais avaliados
+ */
+export function getProdutosMaisAvaliados(limite = 5) {
+  return [...PRODUTOS].sort((a, b) => b.avaliacoes - a.avaliacoes).slice(0, limite);
 }

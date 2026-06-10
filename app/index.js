@@ -1,7 +1,19 @@
-import { View, Text, ScrollView, StyleSheet, Animated, Pressable, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  Animated,
+  Pressable,
+  ActivityIndicator,
+  Image,
+  FlatList,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { useState, useEffect, useRef } from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS, ANIMATIONS } from '../constants/theme';
+import { getProdutosDestaque, getCategorias, PRODUTOS } from '../data/produtos';
 
 function PressableScale({ children, onPress, style }) {
   const scale = useRef(new Animated.Value(1)).current;
@@ -9,7 +21,7 @@ function PressableScale({ children, onPress, style }) {
   const handlePressIn = () => {
     Animated.timing(scale, {
       toValue: 0.95,
-      duration: 100,
+      duration: ANIMATIONS.fast,
       useNativeDriver: true,
     }).start();
   };
@@ -17,7 +29,7 @@ function PressableScale({ children, onPress, style }) {
   const handlePressOut = () => {
     Animated.timing(scale, {
       toValue: 1,
-      duration: 150,
+      duration: ANIMATIONS.normal,
       useNativeDriver: true,
     }).start();
   };
@@ -36,34 +48,68 @@ function PressableScale({ children, onPress, style }) {
   );
 }
 
+/**
+ * Card de Destaque com Imagem Real
+ */
 function DestaqueCard({ produto }) {
   const router = useRouter();
+  const [imageLoaded, setImageLoaded] = useState(false);
 
   return (
     <PressableScale
       style={s.card}
       onPress={() => router.push(`/produto/${produto.id}`)}
     >
+      {/* Imagem com Skeleton Loading */}
       <View style={s.cardImageWrapper}>
-        <View style={s.cardImg}>
-          <Text style={s.cardImgPlaceholder}>🍟</Text>
-        </View>
+        {!imageLoaded && (
+          <View style={[s.cardImg, s.skeleton]}>
+            <ActivityIndicator size="large" color={COLORS.primary} />
+          </View>
+        )}
+        <Image
+          source={{ uri: produto.imagem }}
+          style={[s.cardImg, { display: imageLoaded ? 'flex' : 'none' }]}
+          onLoad={() => setImageLoaded(true)}
+        />
+
+        {/* Badge de Ranking */}
         <View style={s.rankingBadge}>
-          <Text style={s.rankingText}>⭐ Nº{produto.ranking}</Text>
+          <Ionicons name="star" size={14} color="#FFD700" />
+          <Text style={s.rankingText}> Nº{produto.ranking}</Text>
+        </View>
+
+        {/* Badge de Avaliação */}
+        <View style={s.ratingBadge}>
+          <Text style={s.ratingText}>{produto.avaliacoes}</Text>
+          <Ionicons name="star" size={12} color={COLORS.primary} />
         </View>
       </View>
+
+      {/* Conteúdo */}
       <View style={s.cardInfo}>
         <View style={s.cardHeader}>
-          <Text style={s.cardNome} numberOfLines={2}>{produto.nome}</Text>
-          <Text style={s.cardDesc} numberOfLines={2}>{produto.descricao}</Text>
+          <Text style={s.cardNome} numberOfLines={2}>
+            {produto.nome}
+          </Text>
+          <Text style={s.cardDesc} numberOfLines={2}>
+            {produto.descricao}
+          </Text>
         </View>
+
         <View style={s.cardFooter}>
-          <Text style={s.cardPreco}>{produto.preco}</Text>
+          <View>
+            <Text style={s.cardPreco}>{produto.precoFormatado}</Text>
+            <Text style={s.cardTempo}>
+              <Ionicons name="time" size={12} color={COLORS.textMuted} />
+              {' '}{produto.tempo} min
+            </Text>
+          </View>
           <PressableScale
             style={s.addBtn}
             onPress={() => router.push(`/produto/${produto.id}`)}
           >
-            <Ionicons name="add-circle" size={22} color="#FFFFFF" />
+            <Ionicons name="add" size={24} color={COLORS.text} />
           </PressableScale>
         </View>
       </View>
@@ -71,84 +117,81 @@ function DestaqueCard({ produto }) {
   );
 }
 
+/**
+ * Card de Categoria
+ */
 function CategoryCard({ icon, label, onPress }) {
   return (
     <PressableScale style={s.categoryCard} onPress={onPress}>
       <View style={s.categoryIconContainer}>
-        <Ionicons name={icon} size={32} color="#C8321A" />
+        <Ionicons name={icon} size={28} color={COLORS.primary} />
       </View>
       <Text style={s.categoryLabel}>{label}</Text>
     </PressableScale>
   );
 }
 
-const PRODUTOS_EXEMPLO = [
-  {
-    id: '1',
-    nome: 'Batata de Hot Dog',
-    descricao: 'Batata recheada, molho especial de salsicha, requeijão cremoso, mussarela, bacon, batata palha',
-    preco: 'R$ 25,99',
-    ranking: 1,
-  },
-  {
-    id: '2',
-    nome: 'Brócolis com Bacon',
-    descricao: 'Batata recheada, molho especial com brócolis, bacon, requeijão, mussarela e batata palha',
-    preco: 'R$ 26,99',
-    ranking: 2,
-  },
-  {
-    id: '3',
-    nome: 'Calabresa Especial',
-    descricao: 'Batata com molho cremoso de calabresa, requeijão cremoso, bacon e batata palha',
-    preco: 'R$ 25,99',
-    ranking: 3,
-  },
-];
-
+/**
+ * Tela Principal
+ */
 export default function Home() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [produtosDestaque, setProdutosDestaque] = useState([]);
 
   useEffect(() => {
-    setLoading(false);
+    // Simular carregamento de dados
+    setTimeout(() => {
+      setProdutosDestaque(getProdutosDestaque());
+      setLoading(false);
+    }, 300);
   }, []);
 
   return (
     <View style={s.container}>
-      <ScrollView style={s.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
-        {/* HERO SECTION */}
+      <ScrollView
+        style={s.scroll}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: SPACING[10] }}
+      >
+        {/* ===== HERO SECTION ===== */}
         <View style={s.hero}>
-          <Text style={s.heroTitle}>Fome de Batata Top? 🍟</Text>
-          <Text style={s.heroSub}>
-            Batatas gigantes, recheios generosos e aquele sabor que só a batata top tem
-          </Text>
-          <View style={s.heroStats}>
-            <View style={s.heroStat}>
-              <Text style={s.heroStatValue}>35+</Text>
-              <Text style={s.heroStatLabel}>Pedidos</Text>
+          <View style={s.heroContent}>
+            <Text style={s.heroTitle}>Fome de Batata Top? 🍟</Text>
+            <Text style={s.heroSub}>
+              Batatas gigantes, recheios generosos e aquele sabor que só a batata top tem
+            </Text>
+
+            {/* Stats */}
+            <View style={s.heroStats}>
+              <View style={s.heroStat}>
+                <Text style={s.heroStatValue}>35+</Text>
+                <Text style={s.heroStatLabel}>Pedidos</Text>
+              </View>
+              <View style={s.heroStatDivider} />
+              <View style={s.heroStat}>
+                <Text style={s.heroStatValue}>15-22</Text>
+                <Text style={s.heroStatLabel}>Minutos</Text>
+              </View>
+              <View style={s.heroStatDivider} />
+              <View style={s.heroStat}>
+                <Text style={s.heroStatValue}>Grátis</Text>
+                <Text style={s.heroStatLabel}>Frete*</Text>
+              </View>
             </View>
-            <View style={s.heroStatDivider} />
-            <View style={s.heroStat}>
-              <Text style={s.heroStatValue}>15-22</Text>
-              <Text style={s.heroStatLabel}>Minutos</Text>
-            </View>
-            <View style={s.heroStatDivider} />
-            <View style={s.heroStat}>
-              <Text style={s.heroStatValue}>Grátis</Text>
-              <Text style={s.heroStatLabel}>Frete*</Text>
-            </View>
+
+            {/* CTA Button */}
+            <PressableScale
+              style={s.heroCta}
+              onPress={() => router.push('/cardapio')}
+            >
+              <Text style={s.heroCtaText}>Ver Cardápio Completo</Text>
+              <Ionicons name="arrow-forward" size={18} color={COLORS.text} />
+            </PressableScale>
           </View>
-          <PressableScale
-            style={s.heroCta}
-            onPress={() => router.push('/cardapio')}
-          >
-            <Text style={s.heroCtaText}>Ver Cardápio Completo</Text>
-            <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
-          </PressableScale>
         </View>
 
-        {/* QUICK CATEGORIES */}
+        {/* ===== CATEGORIAS RÁPIDAS ===== */}
         <View style={s.categoriesSection}>
           <Text style={s.sectionTitle}>Categorias Populares</Text>
           <View style={s.categoriesGrid}>
@@ -175,7 +218,7 @@ export default function Home() {
           </View>
         </View>
 
-        {/* HIGHLIGHTS SECTION */}
+        {/* ===== DESTAQUES ===== */}
         <View style={s.section}>
           <View style={s.sectionHeader}>
             <Text style={s.sectionTitle}>As Mais Desejadas</Text>
@@ -186,17 +229,17 @@ export default function Home() {
 
           {loading ? (
             <View style={s.loaderContainer}>
-              <ActivityIndicator size="large" color="#C8321A" />
+              <ActivityIndicator size="large" color={COLORS.primary} />
               <Text style={s.loaderText}>Carregando destaques...</Text>
             </View>
           ) : (
-            PRODUTOS_EXEMPLO.map((p) => (
+            produtosDestaque.map((p) => (
               <DestaqueCard key={p.id} produto={p} />
             ))
           )}
         </View>
 
-        {/* PROMOTIONAL BANNER */}
+        {/* ===== BANNER PROMOCIONAL ===== */}
         <View style={s.promoBanner}>
           <View style={s.promoBannerContent}>
             <Text style={s.promoBannerTitle}>Primeira Compra? 🎁</Text>
@@ -205,7 +248,7 @@ export default function Home() {
               <Text style={s.promoBannerBtnText}>Aproveitar Oferta</Text>
             </Pressable>
           </View>
-          <Ionicons name="gift" size={60} color="#F5A623" style={s.promoBannerIcon} />
+          <Ionicons name="gift" size={56} color={COLORS.primary} style={s.promoBannerIcon} />
         </View>
       </ScrollView>
     </View>
@@ -215,127 +258,131 @@ export default function Home() {
 const s = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9F5F0',
+    backgroundColor: COLORS.background,
   },
   scroll: {
     flex: 1,
   },
+
+  // ===== HERO SECTION =====
   hero: {
-    backgroundColor: '#111111',
-    paddingHorizontal: 24,
-    paddingTop: 36,
-    paddingBottom: 28,
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
+    backgroundColor: COLORS.backgroundElevated,
+    paddingHorizontal: SPACING[6],
+    paddingTop: SPACING[8],
+    paddingBottom: SPACING[6],
+    borderBottomLeftRadius: RADIUS['2xl'],
+    borderBottomRightRadius: RADIUS['2xl'],
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  heroContent: {
+    gap: SPACING[4],
   },
   heroTitle: {
-    color: '#FFFFFF',
+    color: COLORS.text,
     fontWeight: '800',
-    fontSize: 32,
-    lineHeight: 38,
+    fontSize: TYPOGRAPHY.sizes['5xl'],
+    lineHeight: 56,
     letterSpacing: -0.5,
   },
   heroSub: {
-    color: '#A3A3A3',
-    marginTop: 12,
-    fontSize: 15,
-    lineHeight: 22,
+    color: COLORS.textSecondary,
+    fontSize: TYPOGRAPHY.sizes.lg,
+    lineHeight: 26,
     fontWeight: '500',
   },
   heroStats: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
-    marginTop: 20,
-    paddingVertical: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 14,
+    marginTop: SPACING[4],
+    paddingVertical: SPACING[3],
+    backgroundColor: 'rgba(230, 57, 70, 0.1)',
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.borderAccent,
   },
   heroStat: {
     alignItems: 'center',
     flex: 1,
   },
   heroStatValue: {
-    color: '#F5A623',
+    color: COLORS.primary,
     fontWeight: '800',
-    fontSize: 16,
+    fontSize: TYPOGRAPHY.sizes.xl,
   },
   heroStatLabel: {
-    color: '#A3A3A3',
-    fontSize: 11,
-    marginTop: 2,
+    color: COLORS.textMuted,
+    fontSize: TYPOGRAPHY.sizes.xs,
+    marginTop: SPACING[1],
   },
   heroStatDivider: {
     width: 1,
     height: 24,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: COLORS.border,
   },
   heroCta: {
-    backgroundColor: '#C8321A',
-    borderRadius: 14,
-    paddingVertical: 15,
-    paddingHorizontal: 20,
+    backgroundColor: COLORS.primary,
+    borderRadius: RADIUS.lg,
+    paddingVertical: SPACING[4],
+    paddingHorizontal: SPACING[6],
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 24,
+    marginTop: SPACING[4],
     flexDirection: 'row',
-    gap: 8,
-    shadowColor: '#C8321A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
+    gap: SPACING[2],
+    ...SHADOWS.glow,
   },
   heroCtaText: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-    fontSize: 16,
+    color: COLORS.text,
+    fontWeight: '700',
+    fontSize: TYPOGRAPHY.sizes.base,
   },
+
+  // ===== CATEGORIAS =====
   categoriesSection: {
-    paddingHorizontal: 20,
-    paddingTop: 28,
-    paddingBottom: 16,
+    paddingHorizontal: SPACING[6],
+    paddingTop: SPACING[8],
+    paddingBottom: SPACING[4],
   },
   categoriesGrid: {
     flexDirection: 'row',
-    gap: 12,
-    marginTop: 12,
+    gap: SPACING[3],
+    marginTop: SPACING[4],
     flexWrap: 'wrap',
   },
   categoryCard: {
     width: '48%',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    paddingVertical: 16,
+    backgroundColor: COLORS.backgroundCard,
+    borderRadius: RADIUS.lg,
+    paddingVertical: SPACING[4],
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#ECE6DC',
-    gap: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    borderColor: COLORS.border,
+    gap: SPACING[2],
+    ...SHADOWS.sm,
   },
   categoryIconContainer: {
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: '#FFF5F0',
+    backgroundColor: 'rgba(230, 57, 70, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   categoryLabel: {
-    color: '#1A1A1A',
+    color: COLORS.text,
     fontWeight: '700',
-    fontSize: 12,
+    fontSize: TYPOGRAPHY.sizes.sm,
     textAlign: 'center',
   },
+
+  // ===== SEÇÃO DE DESTAQUES =====
   section: {
-    paddingHorizontal: 20,
-    paddingTop: 24,
-    gap: 16,
+    paddingHorizontal: SPACING[6],
+    paddingTop: SPACING[8],
+    gap: SPACING[4],
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -343,80 +390,95 @@ const s = StyleSheet.create({
     justifyContent: 'space-between',
   },
   sectionTitle: {
-    color: '#1A1A1A',
+    color: COLORS.text,
     fontWeight: '800',
-    fontSize: 20,
+    fontSize: TYPOGRAPHY.sizes['2xl'],
     letterSpacing: -0.5,
   },
   seeAllLink: {
-    color: '#C8321A',
+    color: COLORS.primary,
     fontWeight: '700',
-    fontSize: 14,
+    fontSize: TYPOGRAPHY.sizes.base,
   },
+
+  // ===== CARDS DE DESTAQUE =====
   card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    backgroundColor: COLORS.backgroundCard,
+    borderRadius: RADIUS.xl,
     borderWidth: 1,
-    borderColor: '#ECE6DC',
+    borderColor: COLORS.border,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 3,
-    marginBottom: 12,
+    ...SHADOWS.md,
+    marginBottom: SPACING[3],
   },
   cardImageWrapper: {
     position: 'relative',
     width: '100%',
-    height: 180,
+    height: 200,
   },
   cardImg: {
     width: '100%',
     height: '100%',
-    backgroundColor: '#FFF5F0',
+    backgroundColor: COLORS.backgroundElevated,
+  },
+  skeleton: {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cardImgPlaceholder: {
-    fontSize: 80,
-  },
   rankingBadge: {
     position: 'absolute',
-    top: 12,
-    left: 12,
-    backgroundColor: '#F5A623',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
+    top: SPACING[3],
+    left: SPACING[3],
+    backgroundColor: 'rgba(255, 215, 0, 0.9)',
+    borderRadius: RADIUS.md,
+    paddingHorizontal: SPACING[2],
+    paddingVertical: SPACING[1],
+    flexDirection: 'row',
+    alignItems: 'center',
+    ...SHADOWS.md,
   },
   rankingText: {
-    color: '#FFFFFF',
-    fontWeight: '800',
-    fontSize: 12,
-    letterSpacing: 0.5,
+    color: '#000',
+    fontWeight: '700',
+    fontSize: TYPOGRAPHY.sizes.xs,
   },
+  ratingBadge: {
+    position: 'absolute',
+    top: SPACING[3],
+    right: SPACING[3],
+    backgroundColor: 'rgba(15, 20, 25, 0.8)',
+    borderRadius: RADIUS.md,
+    paddingHorizontal: SPACING[2],
+    paddingVertical: SPACING[1],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING[1],
+    borderWidth: 1,
+    borderColor: COLORS.borderAccent,
+  },
+  ratingText: {
+    color: COLORS.text,
+    fontWeight: '700',
+    fontSize: TYPOGRAPHY.sizes.xs,
+  },
+
+  // ===== INFO DO CARD =====
   cardInfo: {
-    padding: 16,
-    gap: 12,
+    padding: SPACING[4],
+    gap: SPACING[3],
   },
   cardHeader: {
-    gap: 6,
+    gap: SPACING[2],
   },
   cardNome: {
-    color: '#1A1A1A',
-    fontWeight: 'bold',
-    fontSize: 18,
+    color: COLORS.text,
+    fontWeight: '700',
+    fontSize: TYPOGRAPHY.sizes.lg,
   },
   cardDesc: {
-    color: '#6B6B6B',
-    fontSize: 13,
-    lineHeight: 18,
+    color: COLORS.textMuted,
+    fontSize: TYPOGRAPHY.sizes.sm,
+    lineHeight: 20,
   },
   cardFooter: {
     flexDirection: 'row',
@@ -424,80 +486,79 @@ const s = StyleSheet.create({
     justifyContent: 'space-between',
   },
   cardPreco: {
-    color: '#C8321A',
+    color: COLORS.primary,
     fontWeight: '800',
-    fontSize: 20,
+    fontSize: TYPOGRAPHY.sizes['2xl'],
+  },
+  cardTempo: {
+    color: COLORS.textMuted,
+    fontSize: TYPOGRAPHY.sizes.xs,
+    marginTop: SPACING[1],
   },
   addBtn: {
-    backgroundColor: '#C8321A',
-    borderRadius: 12,
+    backgroundColor: COLORS.primary,
+    borderRadius: RADIUS.lg,
     width: 48,
     height: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#C8321A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
+    ...SHADOWS.glow,
   },
+
+  // ===== BANNER PROMOCIONAL =====
   promoBanner: {
-    marginHorizontal: 20,
-    marginTop: 28,
-    marginBottom: 20,
-    paddingHorizontal: 20,
-    paddingVertical: 20,
-    backgroundColor: '#FFF5F0',
-    borderRadius: 16,
+    marginHorizontal: SPACING[6],
+    marginTop: SPACING[8],
+    marginBottom: SPACING[4],
+    paddingHorizontal: SPACING[5],
+    paddingVertical: SPACING[5],
+    backgroundColor: 'rgba(230, 57, 70, 0.1)',
+    borderRadius: RADIUS.xl,
     borderWidth: 1,
-    borderColor: '#F5A623',
+    borderColor: COLORS.borderAccent,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    shadowColor: '#F5A623',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 2,
   },
   promoBannerContent: {
     flex: 1,
   },
   promoBannerTitle: {
-    color: '#1A1A1A',
-    fontWeight: 'bold',
-    fontSize: 16,
+    color: COLORS.text,
+    fontWeight: '700',
+    fontSize: TYPOGRAPHY.sizes.base,
   },
   promoBannerDesc: {
-    color: '#6B6B6B',
-    fontSize: 13,
-    marginTop: 4,
-    marginBottom: 12,
+    color: COLORS.textSecondary,
+    fontSize: TYPOGRAPHY.sizes.sm,
+    marginTop: SPACING[1],
+    marginBottom: SPACING[3],
   },
   promoBannerBtn: {
-    backgroundColor: '#C8321A',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    backgroundColor: COLORS.primary,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: SPACING[3],
+    paddingVertical: SPACING[2],
     alignSelf: 'flex-start',
   },
   promoBannerBtnText: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-    fontSize: 12,
+    color: COLORS.text,
+    fontWeight: '700',
+    fontSize: TYPOGRAPHY.sizes.xs,
   },
   promoBannerIcon: {
-    marginLeft: 12,
+    marginLeft: SPACING[4],
   },
+
+  // ===== LOADER =====
   loaderContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 48,
-    gap: 12,
+    paddingVertical: SPACING[12],
+    gap: SPACING[3],
   },
   loaderText: {
-    color: '#6B6B6B',
-    fontSize: 14,
-    fontWeight: '500',
+    color: COLORS.textMuted,
+    fontSize: TYPOGRAPHY.sizes.base,
   },
 });

@@ -1,9 +1,55 @@
-import { Stack } from 'expo-router';
-import { View, Text, StatusBar, StyleSheet, Image, Pressable, Modal, ScrollView, TextInput, Animated } from 'react-native';
+import { Stack, useRouter, usePathname } from 'expo-router';
+import { View, Text, StatusBar, StyleSheet, Pressable, Modal, ScrollView, TextInput, Animated } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useRef } from 'react';
 
+/* ============ CONTEXT DO CARRINHO ============ */
+import { createContext, useContext } from 'react';
+
+const CartContext = createContext({
+  items: [],
+  addItem: () => {},
+  removeItem: () => {},
+  updateQty: () => {},
+  clear: () => {},
+  totalItems: 0,
+});
+
+export function CartProvider({ children }) {
+  const [items, setItems] = useState([]);
+  
+  const addItem = (product) => {
+    setItems(prev => {
+      const existing = prev.find(i => i.id === product.id);
+      if (existing) {
+        return prev.map(i => i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
+      }
+      return [...prev, { ...product, quantity: 1, precoNum: parseFloat(product.preco.replace(/[^\d,]/g, '').replace(',', '.')) * 100 }];
+    });
+  };
+  
+  const removeItem = (id) => setItems(prev => prev.filter(i => i.id !== id));
+  
+  const updateQty = (id, qty) => {
+    if (qty <= 0) { removeItem(id); return; }
+    setItems(prev => prev.map(i => i.id === id ? { ...i, quantity: qty } : i));
+  };
+  
+  const clear = () => setItems([]);
+  
+  const totalItems = items.reduce((sum, i) => sum + i.quantity, 0);
+  
+  return (
+    <CartContext.Provider value={{ items, addItem, removeItem, updateQty, clear, totalItems }}>
+      {children}
+    </CartContext.Provider>
+  );
+}
+
+export const useCart = () => useContext(CartContext);
+
+/* ============ MODAL DE ENDEREÇO ============ */
 function AddressModal({ visible, onClose, onSelectAddress }) {
   const [addresses, setAddresses] = useState([
     { id: 1, label: 'Casa', address: 'Rua das Flores, 123 - Iacanga, SP', main: true },
@@ -50,7 +96,7 @@ function AddressModal({ visible, onClose, onSelectAddress }) {
               onPress={() => handleSelectAddress(addr)}
             >
               <View style={s.addressItemLeft}>
-                <Ionicons name="location" size={24} color="#C8321A" />
+                <Ionicons name="location" size={24} color="#EA1D2C" />
                 <View style={s.addressItemText}>
                   <Text style={s.addressItemLabel}>{addr.label}</Text>
                   <Text style={s.addressItemAddress}>{addr.address}</Text>
@@ -62,7 +108,7 @@ function AddressModal({ visible, onClose, onSelectAddress }) {
 
           {!showForm ? (
             <Pressable style={s.addAddressBtn} onPress={() => setShowForm(true)}>
-              <Ionicons name="add-circle" size={24} color="#C8321A" />
+              <Ionicons name="add-circle" size={24} color="#EA1D2C" />
               <Text style={s.addAddressBtnText}>Adicionar novo endereço</Text>
             </Pressable>
           ) : (
@@ -90,6 +136,7 @@ function AddressModal({ visible, onClose, onSelectAddress }) {
   );
 }
 
+/* ============ HEADER GLOBAL ============ */
 function Header() {
   const [selectedAddress, setSelectedAddress] = useState({
     label: 'Casa',
@@ -97,19 +144,15 @@ function Header() {
   });
   const [addressModalVisible, setAddressModalVisible] = useState(false);
   const scaleAnim = useRef(new Animated.Value(1)).current;
+  const router = useRouter();
+  const { totalItems } = useCart();
 
   const handlePressIn = () => {
-    Animated.spring(scaleAnim, {
-      toValue: 0.98,
-      useNativeDriver: true,
-    }).start();
+    Animated.spring(scaleAnim, { toValue: 0.98, useNativeDriver: true }).start();
   };
 
   const handlePressOut = () => {
-    Animated.spring(scaleAnim, {
-      toValue: 1,
-      useNativeDriver: true,
-    }).start();
+    Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true }).start();
   };
 
   return (
@@ -121,15 +164,17 @@ function Header() {
               <Text style={s.logoText}>🍟</Text>
             </View>
             <View>
-              <Text style={s.logoTitle}>batata top</Text>
+              <Text style={s.logoTitle}>Batata Top</Text>
               <Text style={s.logoSubtitle}>Iacanga - SP</Text>
             </View>
           </View>
-          <Pressable style={s.cartBtn}>
-            <Ionicons name="cart" size={24} color="#FFFFFF" />
-            <View style={s.cartBadge}>
-              <Text style={s.cartBadgeText}>0</Text>
-            </View>
+          <Pressable style={s.cartBtn} onPress={() => router.push('/cart')}>
+            <Ionicons name="cart-outline" size={26} color="#FFFFFF" />
+            {totalItems > 0 && (
+              <View style={s.cartBadge}>
+                <Text style={s.cartBadgeText}>{totalItems}</Text>
+              </View>
+            )}
           </Pressable>
         </View>
 
@@ -141,7 +186,7 @@ function Header() {
             onPressOut={handlePressOut}
           >
             <View style={s.addressSelectorLeft}>
-              <Ionicons name="location" size={20} color="#C8321A" />
+              <Ionicons name="location-outline" size={20} color="#EA1D2C" />
               <View style={s.addressSelectorText}>
                 <Text style={s.addressSelectorLabel}>Entregando em</Text>
                 <Text style={s.addressSelectorValue} numberOfLines={1}>
@@ -149,7 +194,7 @@ function Header() {
                 </Text>
               </View>
             </View>
-            <Ionicons name="chevron-down" size={20} color="#C8321A" />
+            <Ionicons name="chevron-down" size={20} color="#EA1D2C" />
           </Pressable>
         </Animated.View>
       </SafeAreaView>
@@ -163,25 +208,78 @@ function Header() {
   );
 }
 
-export default function RootLayout() {
+/* ============ BOTTOM TAB BAR ============ */
+function BottomTabBar() {
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const tabs = [
+    { name: 'index', label: 'Início', icon: 'home', iconOutline: 'home-outline' },
+    { name: 'cardapio', label: 'Cardápio', icon: 'restaurant', iconOutline: 'restaurant-outline' },
+    { name: 'pedidos', label: 'Pedidos', icon: 'receipt', iconOutline: 'receipt-outline' },
+    { name: 'profile', label: 'Perfil', icon: 'person', iconOutline: 'person-outline' },
+  ];
+
+  const isActive = (routeName) => {
+    if (routeName === 'index') return pathname === '/' || pathname === '/index';
+    return pathname.includes(routeName);
+  };
+
   return (
-    <SafeAreaProvider>
-      <StatusBar backgroundColor="#111111" barStyle="light-content" />
-      <Header />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: '#F9F5F0' },
-          animationEnabled: true,
-        }}
-      />
-    </SafeAreaProvider>
+    <View style={s.tabBar}>
+      {tabs.map((tab) => {
+        const active = isActive(tab.name);
+        return (
+          <Pressable
+            key={tab.name}
+            style={s.tabItem}
+            onPress={() => router.push(tab.name === 'index' ? '/' : `/${tab.name}`)}
+          >
+            <Ionicons
+              name={active ? tab.icon : tab.iconOutline}
+              size={24}
+              color={active ? '#EA1D2C' : '#A3A3A3'}
+            />
+            <Text style={[s.tabLabel, active && s.tabLabelActive]}>
+              {tab.label}
+            </Text>
+            {active && <View style={s.tabIndicator} />}
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 
+/* ============ LAYOUT ROOT ============ */
+export default function RootLayout() {
+  return (
+    <CartProvider>
+      <SafeAreaProvider>
+        <StatusBar backgroundColor="#EA1D2C" barStyle="light-content" />
+        <View style={{ flex: 1 }}>
+          <Header />
+          <View style={{ flex: 1 }}>
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                contentStyle: { backgroundColor: '#F8F9FA' },
+                animationEnabled: true,
+              }}
+            />
+          </View>
+          <BottomTabBar />
+        </View>
+      </SafeAreaProvider>
+    </CartProvider>
+  );
+}
+
+/* ============ STYLES ============ */
 const s = StyleSheet.create({
+  /* Header */
   headerSafe: {
-    backgroundColor: '#111111',
+    backgroundColor: '#EA1D2C',
   },
   headerRow: {
     flexDirection: 'row',
@@ -199,8 +297,8 @@ const s = StyleSheet.create({
   logoBg: {
     width: 44,
     height: 44,
-    borderRadius: 10,
-    backgroundColor: '#C8321A',
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -214,7 +312,7 @@ const s = StyleSheet.create({
     letterSpacing: -0.5,
   },
   logoSubtitle: {
-    color: '#A3A3A3',
+    color: 'rgba(255,255,255,0.8)',
     fontSize: 11,
     fontWeight: '500',
     marginTop: 2,
@@ -225,17 +323,19 @@ const s = StyleSheet.create({
   },
   cartBadge: {
     position: 'absolute',
-    top: 0,
-    right: 0,
-    backgroundColor: '#F5A623',
+    top: 2,
+    right: 2,
+    backgroundColor: '#FFB500',
     borderRadius: 10,
-    width: 22,
-    height: 22,
+    minWidth: 20,
+    height: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#EA1D2C',
   },
   cartBadgeText: {
-    color: '#FFFFFF',
+    color: '#1A1A1A',
     fontWeight: 'bold',
     fontSize: 11,
   },
@@ -249,8 +349,6 @@ const s = StyleSheet.create({
     paddingVertical: 11,
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#ECE6DC',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
@@ -277,9 +375,52 @@ const s = StyleSheet.create({
     fontWeight: '700',
     marginTop: 2,
   },
+
+  /* Bottom Tab Bar */
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: '#ECE6DC',
+    paddingBottom: 8,
+    paddingTop: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  tabItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    position: 'relative',
+    paddingVertical: 4,
+  },
+  tabLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#A3A3A3',
+    marginTop: 2,
+  },
+  tabLabelActive: {
+    color: '#EA1D2C',
+    fontWeight: '700',
+  },
+  tabIndicator: {
+    position: 'absolute',
+    top: -8,
+    width: 40,
+    height: 3,
+    backgroundColor: '#EA1D2C',
+    borderRadius: 2,
+  },
+
+  /* Address Modal */
   modalContainer: {
     flex: 1,
-    backgroundColor: '#F9F5F0',
+    backgroundColor: '#F8F9FA',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -289,6 +430,7 @@ const s = StyleSheet.create({
     paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#ECE6DC',
+    backgroundColor: '#FFFFFF',
   },
   modalTitle: {
     fontSize: 18,
@@ -337,13 +479,13 @@ const s = StyleSheet.create({
     marginTop: 3,
   },
   mainBadge: {
-    backgroundColor: '#F5A623',
+    backgroundColor: '#FFB500',
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 8,
   },
   mainBadgeText: {
-    color: '#FFFFFF',
+    color: '#1A1A1A',
     fontSize: 11,
     fontWeight: 'bold',
   },
@@ -355,12 +497,12 @@ const s = StyleSheet.create({
     paddingVertical: 16,
     marginVertical: 16,
     borderWidth: 2,
-    borderColor: '#C8321A',
+    borderColor: '#EA1D2C',
     borderRadius: 14,
     backgroundColor: '#FFF5F0',
   },
   addAddressBtnText: {
-    color: '#C8321A',
+    color: '#EA1D2C',
     fontWeight: '700',
     fontSize: 14,
   },
@@ -382,7 +524,7 @@ const s = StyleSheet.create({
     fontSize: 14,
     color: '#1A1A1A',
     marginBottom: 12,
-    backgroundColor: '#F9F5F0',
+    backgroundColor: '#F8F9FA',
   },
   formButtons: {
     flexDirection: 'row',
@@ -405,7 +547,7 @@ const s = StyleSheet.create({
     flex: 1,
     paddingVertical: 12,
     borderRadius: 10,
-    backgroundColor: '#C8321A',
+    backgroundColor: '#EA1D2C',
     alignItems: 'center',
   },
   formBtnSaveText: {

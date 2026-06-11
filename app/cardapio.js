@@ -9,435 +9,381 @@ import {
   TextInput,
   Image,
 } from 'react-native';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS, ANIMATIONS } from '../constants/theme';
+import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { useProdutos, useProdutosPorCategoria, useBuscarProdutos } from './hooks/useProdutos';
 
+// MAPEAMENTO: label visível → valor exato no campo `category` do Supabase
+// Se o banco usar 'Batatas' com maiúscula, troque aqui.
+const CATEGORIA_MAP = {
+  'Todas':   'Todas',
+  'Batatas': 'batata',
+  'Macarrão':'macarrao',
+  'Bebidas': 'bebida',
+};
+
+// ─── PressableScale ───────────────────────────────────────────────────────────
 function PressableScale({ children, onPress, style }) {
   const scale = useRef(new Animated.Value(1)).current;
-
-  const handlePressIn = () => {
-    Animated.timing(scale, {
-      toValue: 0.95,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
-  };
-
-  const handlePressOut = () => {
-    Animated.timing(scale, {
-      toValue: 1,
-      duration: 300,
-      useNativeDriver: true,
-    }).start();
-  };
-
+  const onIn  = () => Animated.timing(scale, { toValue: 0.96, duration: 100, useNativeDriver: true }).start();
+  const onOut = () => Animated.timing(scale, { toValue: 1,    duration: 180, useNativeDriver: true }).start();
   return (
-    <Pressable
-      onPress={onPress}
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
-      style={style}
-    >
-      <Animated.View style={{ transform: [{ scale }] }}>
-        {children}
-      </Animated.View>
+    <Pressable onPress={onPress} onPressIn={onIn} onPressOut={onOut} style={style}>
+      <Animated.View style={{ transform: [{ scale }] }}>{children}</Animated.View>
     </Pressable>
   );
 }
 
-/**
- * Card de Produto com Imagem Real
- */
+// ─── Fallbacks de imagem ──────────────────────────────────────────────────────
+const IMG_FALLBACK = {
+  batatas:  'https://images.unsplash.com/photo-1518013391915-e40643a1bce1?w=400',
+  macarrao: 'https://images.unsplash.com/photo-1551183053-bf91a1d81141?w=400',
+  bebidas:  'https://images.unsplash.com/photo-1544145945-f904253d0c7b?w=400',
+};
+function fallback(cat) {
+  const k = (cat ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return IMG_FALLBACK[k] ?? IMG_FALLBACK.batatas;
+}
+
+// ─── ProdutoCard ──────────────────────────────────────────────────────────────
 function ProdutoCard({ produto }) {
   const router = useRouter();
-  const [useFallback, setUseFallback] = useState(false);
-
-  const FALLBACKS = {
-    batatas: 'https://images.unsplash.com/photo-1518013391915-e40643a1bce1?w=400',
-    batata: 'https://images.unsplash.com/photo-1518013391915-e40643a1bce1?w=400',
-    bebidas: 'https://images.unsplash.com/photo-1544145945-f904253d0c7b?w=400',
-    bebida: 'https://images.unsplash.com/photo-1544145945-f904253d0c7b?w=400',
-    macarrao: 'https://images.unsplash.com/photo-1551183053-bf91a1d81141?w=400',
-  };
-
-  const imageSource = useFallback
-    ? { uri: FALLBACKS[produto.categoria?.toLowerCase()] || FALLBACKS.batatas }
-    : { uri: produto.imagem };
+  const [imgErr, setImgErr] = useState(false);
 
   return (
-    <PressableScale
+    <Pressable
       style={s.card}
       onPress={() => router.push(`/produto/${produto.id}`)}
     >
-      <View style={s.cardImgContainer}>
+      {/* Imagem */}
+      <View style={s.imgBox}>
         <Image
-          source={imageSource}
-          style={s.cardImg}
-          onError={() => setUseFallback(true)}
+          source={{ uri: imgErr ? fallback(produto.categoria) : produto.imagem }}
+          style={s.img}
+          onError={() => setImgErr(true)}
         />
-
-        {/* Badge de Avaliação */}
-        <View style={s.ratingBadge}>
-          <Ionicons name="star" size={12} color={COLORS.primary} />
-          <Text style={s.ratingText}>{produto.avaliacoes}</Text>
+        <View style={s.ratingPin}>
+          <Ionicons name="star" size={9} color={COLORS.primary} />
+          <Text style={s.ratingTxt}>{produto.avaliacoes ?? '4.5'}</Text>
         </View>
       </View>
 
-      {/* Informações */}
-      <View style={s.cardInfo}>
-        <View style={s.cardHeader}>
-          <Text style={s.cardNome} numberOfLines={2}>
-            {produto.nome}
-          </Text>
-          <Text style={s.cardDesc} numberOfLines={2}>
-            {produto.descricao}
-          </Text>
+      {/* Info */}
+      <View style={s.info}>
+        <View>
+          <Text style={s.nome} numberOfLines={2}>{produto.nome}</Text>
+          <Text style={s.desc} numberOfLines={2}>{produto.descricao}</Text>
         </View>
 
-        <View style={s.cardFooter}>
+        <View style={s.footer}>
           <View>
-            <Text style={s.cardPreco}>{produto.precoFormatado}</Text>
-            <View style={s.tempoContainer}>
-              <Ionicons name="time" size={12} color={COLORS.textMuted} />
-              <Text style={s.cardTempo}>{produto.tempo} min</Text>
+            <Text style={s.preco}>{produto.precoFormatado}</Text>
+            <View style={s.tempoRow}>
+              <Ionicons name="time-outline" size={10} color={COLORS.textMuted} />
+              <Text style={s.tempo}>{produto.tempo} min</Text>
             </View>
           </View>
-          <PressableScale
+          <Pressable
             style={s.addBtn}
             onPress={() => router.push(`/produto/${produto.id}`)}
+            hitSlop={8}
           >
-            <Ionicons name="add-circle" size={28} color={COLORS.primary} />
-          </PressableScale>
+            <Ionicons name="add" size={18} color={COLORS.text} />
+          </Pressable>
         </View>
       </View>
-    </PressableScale>
+    </Pressable>
   );
 }
 
-/**
- * Tela de Cardápio
- */
+// ─── Tela de Cardápio ─────────────────────────────────────────────────────────
 import { useScrollHandler } from './_layout';
 
+const TABS = ['Todas', 'Batatas', 'Macarrão', 'Bebidas'];
+
 export default function Cardapio() {
-  const [categoriaAtiva, setCategoriaAtiva] = useState('Todas');
-  const [searchQuery, setSearchQuery] = useState('');
-  const router = useRouter();
-  const onScroll = useScrollHandler();
+  const [tabAtiva, setTabAtiva] = useState('Todas');
+  const [query, setQuery]       = useState('');
+  const router                  = useRouter();
+  const onScroll                = useScrollHandler();
 
-  const categorias = ['Todas', 'Batatas', 'Macarrão', 'Bebidas'];
+  // valor passado pro hook — passa a string do banco, ou 'Todas' para não filtrar
+  const catParaHook = CATEGORIA_MAP[tabAtiva];
 
-  const { produtos: todosProdutos, loading: loadingTodos } = useProdutos();
-  const { produtos: produtosPorCategoria, loading: loadingCategoria } = useProdutosPorCategoria(categoriaAtiva);
-  const { produtos: produtosBuscados, loading: loadingBusca } = useBuscarProdutos(searchQuery);
+  const { produtos: todos,    loading: lTodos }  = useProdutos();
+  const { produtos: porCat,   loading: lCat }    = useProdutosPorCategoria(catParaHook);
+  const { produtos: buscados, loading: lBusca }  = useBuscarProdutos(query);
 
-  let produtosFiltrados = [];
+  let lista   = [];
   let loading = false;
 
-  if (searchQuery.trim()) {
-    produtosFiltrados = produtosBuscados;
-    loading = loadingBusca;
-  } else if (categoriaAtiva === 'Todas') {
-    produtosFiltrados = todosProdutos;
-    loading = loadingTodos;
+  if (query.trim()) {
+    lista   = buscados;
+    loading = lBusca;
+  } else if (tabAtiva === 'Todas') {
+    lista   = todos;
+    loading = lTodos;
   } else {
-    produtosFiltrados = produtosPorCategoria;
-    loading = loadingCategoria;
+    lista   = porCat;
+    loading = lCat;
   }
 
+  const scrollHandler = typeof onScroll === 'function' ? onScroll() : null;
+
   return (
-    <View style={s.container}>
-      {/* ===== HEADER ===== */}
-      <View style={s.pageHeader}>
-        <View style={s.headerTop}>
-          <PressableScale onPress={() => router.back()} style={s.backBtn}>
-            <Ionicons name="chevron-back" size={24} color={COLORS.primary} />
-          </PressableScale>
+    <View style={s.screen}>
+
+      {/* ── HEADER ── */}
+      <View style={s.header}>
+        <View style={s.headerRow}>
+          <Pressable style={s.backBtn} onPress={() => router.back()} hitSlop={8}>
+            <Ionicons name="chevron-back" size={20} color={COLORS.primary} />
+          </Pressable>
           <Text style={s.titulo}>Cardápio</Text>
-          <View style={{ width: 24 }} />
+          <View style={{ width: 36 }} />
         </View>
 
-        {/* Search Bar */}
-        <View style={s.searchContainer}>
-          <Ionicons name="search" size={18} color={COLORS.textMuted} style={s.searchIcon} />
+        <View style={s.searchBox}>
+          <Ionicons name="search-outline" size={15} color={COLORS.textMuted} />
           <TextInput
             style={s.searchInput}
-            placeholder="Buscar produtos..."
+            placeholder="Buscar produto..."
             placeholderTextColor={COLORS.textMuted}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
+            value={query}
+            onChangeText={setQuery}
           />
-          {searchQuery.length > 0 && (
-            <Pressable onPress={() => setSearchQuery('')}>
-              <Ionicons name="close-circle" size={18} color={COLORS.textMuted} />
+          {query.length > 0 && (
+            <Pressable onPress={() => setQuery('')} hitSlop={8}>
+              <Ionicons name="close-circle" size={15} color={COLORS.textMuted} />
             </Pressable>
           )}
         </View>
       </View>
 
-      {/* ===== FILTROS ===== */}
-      <View style={s.filtrosContainer}>
-        <View style={s.filtrosContent}>
-          {categorias.map((cat) => {
-            const ativo = cat === categoriaAtiva;
-            return (
-              <PressableScale
-                key={cat}
-                onPress={() => setCategoriaAtiva(cat)}
-                style={[s.filtroBtn, ativo ? s.filtroBtnAtivo : s.filtroBtnInativo]}
-              >
-                <Text style={[s.filtroText, ativo ? s.filtroTextAtivo : s.filtroTextInativo]}>
-                  {cat}
-                </Text>
-              </PressableScale>
-            );
-          })}
-        </View>
+      {/* ── ABAS / FILTROS ── */}
+      <View style={s.tabsRow}>
+        {TABS.map((tab) => {
+          const ativo = tab === tabAtiva;
+          return (
+            <Pressable
+              key={tab}
+              style={[s.tab, ativo ? s.tabAtivo : s.tabInativo]}
+              onPress={() => { setTabAtiva(tab); setQuery(''); }}
+            >
+              <Text style={[s.tabTxt, ativo ? s.tabTxtAtivo : s.tabTxtInativo]}>
+                {tab}
+              </Text>
+            </Pressable>
+          );
+        })}
       </View>
 
-      {/* ===== LISTA DE PRODUTOS ===== */}
+      {/* ── LISTA ── */}
       {loading ? (
-        <View style={s.empty}>
+        <View style={s.center}>
           <ActivityIndicator size="large" color={COLORS.primary} />
-          <Text style={s.emptyTitle}>Carregando cardápio...</Text>
         </View>
       ) : (
         <FlatList
-          data={produtosFiltrados}
-          keyExtractor={(item) => item.id}
+          data={lista}
+          keyExtractor={(item) => String(item.id)}
           renderItem={({ item }) => <ProdutoCard produto={item} />}
-          contentContainerStyle={[s.listaContent, { paddingTop: 150 }]}
+          contentContainerStyle={s.listContent}
           showsVerticalScrollIndicator={false}
-          onScroll={typeof onScroll === 'function' ? onScroll() : null}
+          onScroll={scrollHandler}
           scrollEventThrottle={16}
-          ListEmptyComponent={() => (
-            <View style={s.empty}>
-              <Ionicons name="search" size={48} color={COLORS.primary} />
-              <Text style={s.emptyTitle}>Nenhum produto encontrado</Text>
-              <Text style={s.emptyDesc}>Tente outra busca ou categoria.</Text>
+          ListEmptyComponent={
+            <View style={s.center}>
+              <Ionicons name="storefront-outline" size={44} color={COLORS.border} />
+              <Text style={s.emptyTitle}>Nenhum produto</Text>
+              <Text style={s.emptyDesc}>Tente outra categoria ou busca.</Text>
             </View>
-          )}
+          }
         />
       )}
     </View>
   );
 }
 
+// ─── StyleSheet ───────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
+  screen: { flex: 1, backgroundColor: COLORS.background },
 
-  // ===== HEADER =====
-  pageHeader: {
+  // HEADER
+  header: {
     paddingHorizontal: SPACING[5],
     paddingTop: SPACING[3],
-    paddingBottom: SPACING[4],
+    paddingBottom: SPACING[3],
     backgroundColor: COLORS.backgroundElevated,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
+    gap: SPACING[3],
   },
-  headerTop: {
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: SPACING[4],
   },
   backBtn: {
-    padding: SPACING[1],
+    width: 36,
+    height: 36,
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.backgroundCard,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   titulo: {
-    color: COLORS.text,
-    fontWeight: '800',
-    fontSize: TYPOGRAPHY.sizes['2xl'],
-    letterSpacing: -0.5,
     flex: 1,
     textAlign: 'center',
+    color: COLORS.text,
+    fontWeight: '700',
+    fontSize: TYPOGRAPHY.sizes.xl,
+    letterSpacing: -0.3,
   },
 
-  // ===== SEARCH BAR =====
-  searchContainer: {
+  // SEARCH
+  searchBox: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: SPACING[2],
     paddingHorizontal: SPACING[3],
     paddingVertical: SPACING[2],
     backgroundColor: COLORS.backgroundCard,
     borderRadius: RADIUS.lg,
     borderWidth: 1,
     borderColor: COLORS.border,
-    ...SHADOWS.sm,
-  },
-  searchIcon: {
-    marginRight: SPACING[2],
   },
   searchInput: {
     flex: 1,
-    fontSize: TYPOGRAPHY.sizes.base,
+    fontSize: TYPOGRAPHY.sizes.sm,
     color: COLORS.text,
     paddingVertical: 0,
   },
 
-  // ===== FILTROS =====
-  filtrosContainer: {
+  // ABAS
+  tabsRow: {
+    flexDirection: 'row',
+    gap: SPACING[2],
+    paddingHorizontal: SPACING[5],
     paddingVertical: SPACING[3],
     backgroundColor: COLORS.backgroundElevated,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
-  filtrosContent: {
-    paddingHorizontal: SPACING[5],
-    gap: SPACING[2],
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  filtroBtn: {
+  tab: {
     paddingHorizontal: SPACING[4],
     paddingVertical: SPACING[2],
     borderRadius: RADIUS.full,
     borderWidth: 1,
-    ...SHADOWS.sm,
   },
-  filtroBtnAtivo: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
-  },
-  filtroBtnInativo: {
-    backgroundColor: COLORS.backgroundCard,
-    borderColor: COLORS.border,
-  },
-  filtroText: {
-    fontSize: TYPOGRAPHY.sizes.sm,
-    fontWeight: '700',
-  },
-  filtroTextAtivo: {
-    color: COLORS.text,
-  },
-  filtroTextInativo: {
-    color: COLORS.textMuted,
-  },
+  tabAtivo:   { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  tabInativo: { backgroundColor: 'transparent',  borderColor: COLORS.border  },
+  tabTxt: { fontSize: TYPOGRAPHY.sizes.xs, fontWeight: '700' },
+  tabTxtAtivo:   { color: COLORS.text      },
+  tabTxtInativo: { color: COLORS.textMuted },
 
-  // ===== LISTA =====
-  listaContent: {
+  // LISTA
+  listContent: {
     paddingHorizontal: SPACING[5],
-    paddingVertical: SPACING[4],
+    paddingTop: SPACING[4],
+    paddingBottom: SPACING[12],
     gap: SPACING[3],
-    paddingBottom: SPACING[10],
   },
 
-  // ===== CARD DE PRODUTO =====
+  // CARD
   card: {
+    flexDirection: 'row',
     backgroundColor: COLORS.backgroundCard,
     borderRadius: RADIUS.xl,
     borderWidth: 1,
     borderColor: COLORS.border,
-    flexDirection: 'row',
     overflow: 'hidden',
-    height: 120,
-    marginBottom: SPACING[2],
+    height: 112,
     ...SHADOWS.sm,
   },
-
-  // ===== IMAGEM =====
-  cardImgContainer: {
+  imgBox: {
+    width: 112,
+    height: 112,
+    flexShrink: 0,
     position: 'relative',
-    width: 140,
-    height: '100%',
   },
-  cardImg: {
-    width: '100%',
-    height: '100%',
+  img: {
+    width: 112,
+    height: 112,
     backgroundColor: COLORS.backgroundElevated,
   },
-  skeleton: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ratingBadge: {
+  ratingPin: {
     position: 'absolute',
-    top: SPACING[2],
-    right: SPACING[2],
-    backgroundColor: 'rgba(15, 20, 25, 0.8)',
-    borderRadius: RADIUS.md,
-    paddingHorizontal: SPACING[2],
-    paddingVertical: SPACING[1],
+    bottom: SPACING[2],
+    left: SPACING[2],
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING[1],
-    borderWidth: 1,
-    borderColor: COLORS.borderAccent,
+    gap: 2,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    borderRadius: RADIUS.sm,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    zIndex: 1,
   },
-  ratingText: {
-    color: COLORS.primary,
-    fontWeight: '700',
-    fontSize: TYPOGRAPHY.sizes.xs,
-  },
+  ratingTxt: { color: '#fff', fontSize: 10, fontWeight: '700' },
 
-  // ===== INFO =====
-  cardInfo: {
+  // INFO
+  info: {
     flex: 1,
     padding: SPACING[3],
     justifyContent: 'space-between',
+    overflow: 'hidden',
   },
-  cardHeader: {
-    gap: SPACING[1],
-  },
-  cardNome: {
+  nome: {
     color: COLORS.text,
     fontWeight: '700',
-    fontSize: TYPOGRAPHY.sizes.base,
-    lineHeight: 20,
+    fontSize: TYPOGRAPHY.sizes.sm,
+    lineHeight: 19,
+    marginBottom: 3,
   },
-  cardDesc: {
+  desc: {
     color: COLORS.textMuted,
-    fontSize: TYPOGRAPHY.sizes.xs,
+    fontSize: 11,
     lineHeight: 16,
   },
-  cardFooter: {
+  footer: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     justifyContent: 'space-between',
+    marginTop: SPACING[2],
   },
-  cardPreco: {
+  preco: {
     color: COLORS.primary,
     fontWeight: '800',
-    fontSize: TYPOGRAPHY.sizes.lg,
+    fontSize: TYPOGRAPHY.sizes.base,
   },
-  tempoContainer: {
+  tempoRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING[1],
-    marginTop: SPACING[1],
+    gap: 3,
+    marginTop: 2,
   },
-  cardTempo: {
-    color: COLORS.textMuted,
-    fontSize: TYPOGRAPHY.sizes.xs,
-  },
+  tempo: { color: COLORS.textMuted, fontSize: 10 },
   addBtn: {
-    backgroundColor: 'transparent',
-    borderRadius: RADIUS.lg,
-    width: 40,
-    height: 40,
+    width: 30,
+    height: 30,
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
-  // ===== EMPTY STATE =====
-  empty: {
+  // STATES
+  center: {
     alignItems: 'center',
-    paddingVertical: SPACING[16],
+    justifyContent: 'center',
+    paddingTop: SPACING[16],
     gap: SPACING[3],
   },
-  emptyTitle: {
-    color: COLORS.text,
-    fontWeight: '700',
-    fontSize: TYPOGRAPHY.sizes.base,
-  },
-  emptyDesc: {
-    color: COLORS.textMuted,
-    fontSize: TYPOGRAPHY.sizes.sm,
-  },
+  emptyTitle: { color: COLORS.text,    fontWeight: '700', fontSize: TYPOGRAPHY.sizes.base },
+  emptyDesc:  { color: COLORS.textMuted, fontSize: TYPOGRAPHY.sizes.sm },
 });

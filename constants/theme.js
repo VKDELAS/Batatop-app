@@ -5,9 +5,9 @@
 
 export const COLORS = {
   // Cores Primárias - Batatop Colors
-  primary: '#E61E2A', // Vermelho forte
-  secondary: '#FFD700', // Amarelo Batatop
-  accent: '#FFB800', // Amarelo escuro para detalhes
+  primary: '#FFB800', // Amarelo Batatop
+  secondary: '#E61E2A', // Vermelho para detalhes
+  accent: '#E6A800', // Amarelo escuro para hover/press
   white: '#FFFFFF',
   
   // Backgrounds
@@ -21,12 +21,12 @@ export const COLORS = {
   textSecondary: '#666666',
   textMuted: '#999999',
   textInverse: '#FFFFFF',
-  textPrimary: '#E61E2A',
+  textPrimary: '#FFB800',
 
   // Borders e Dividers
   border: '#EEEEEE',
   borderLight: '#F5F5F5',
-  borderAccent: '#FFD700',
+  borderAccent: '#FFB800',
 
   // Status Colors
   success: '#27AE60',

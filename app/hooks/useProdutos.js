@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from './supabaseConfig';
+import { supabase } from '../../supabaseConfig';
 
 export const useProdutos = () => {
   const [produtos, setProdutos] = useState([]);
@@ -28,8 +28,8 @@ export const useProdutos = () => {
         descricaoLonga: produto.description,
         preco: produto.price,
         precoFormatado: `R$ ${produto.price.toFixed(2).replace('.', ',')}`,
-        categoria: produto.category,
-        imagem: produto.image_url, // URL direta
+        categoria: produto.category ? produto.category.charAt(0).toUpperCase() + produto.category.slice(1) : 'Outros',
+        imagem: produto.image_url ? (produto.image_url.startsWith('http') ? produto.image_url : `https://eucwoxjmjfqylyrqunwk.supabase.co/storage/v1/object/public/Products/${produto.image_url.replace(/^\/products\//, '')}`) : null, // Fallback para URL vazia
         ranking: 0,
         avaliacoes: 4.5,
         avaliacoesCount: 0,
@@ -64,6 +64,10 @@ export const useProdutoById = (id) => {
   const fetchProduto = async () => {
     try {
       setLoading(true);
+      
+      // Tentar converter o ID para UUID apenas se necessário, mas o ideal é garantir que o ID passado seja o correto.
+      // Removendo a trava para permitir que o erro venha do Supabase ou que funcione se o ID for válido.
+      
       const { data, error } = await supabase
         .from('products')
         .select('*')
@@ -71,6 +75,10 @@ export const useProdutoById = (id) => {
         .single();
 
       if (error) throw error;
+      
+      if (!data) {
+        throw new Error('Produto não encontrado');
+      }
 
       const produtoFormatado = {
         id: data.id,
@@ -79,8 +87,9 @@ export const useProdutoById = (id) => {
         descricaoLonga: data.description,
         preco: data.price,
         precoFormatado: `R$ ${data.price.toFixed(2).replace('.', ',')}`,
-        categoria: data.category,
-        imagem: data.image_url,
+        categoria: data.category ? data.category.charAt(0).toUpperCase() + data.category.slice(1) : 'Outros',
+        // Priorizar imagens locais da pasta public/products
+        imagem: data.image_url ? (data.image_url.startsWith('http') ? data.image_url : `https://eucwoxjmjfqylyrqunwk.supabase.co/storage/v1/object/public/Products/${data.image_url.replace(/^\/products\//, '')}`) : null,
         ranking: 0,
         avaliacoes: 4.5,
         avaliacoesCount: 0,
@@ -117,7 +126,8 @@ export const useProdutosPorCategoria = (categoria) => {
       let query = supabase.from('products').select('*');
 
       if (categoria && categoria !== 'Todas') {
-        query = query.eq('category', categoria.toLowerCase());
+        // Converter para o formato do banco (ex: Batatas -> batatas)
+        query = query.ilike('category', categoria);
       }
 
       const { data, error } = await query.order('created_at', { ascending: false });
@@ -131,8 +141,8 @@ export const useProdutosPorCategoria = (categoria) => {
         descricaoLonga: produto.description,
         preco: produto.price,
         precoFormatado: `R$ ${produto.price.toFixed(2).replace('.', ',')}`,
-        categoria: produto.category,
-        imagem: produto.image_url,
+        categoria: produto.category ? produto.category.charAt(0).toUpperCase() + produto.category.slice(1) : 'Outros',
+        imagem: produto.image_url ? (produto.image_url.startsWith('http') ? produto.image_url : `https://eucwoxjmjfqylyrqunwk.supabase.co/storage/v1/object/public/Products/${produto.image_url.replace(/^\/products\//, '')}`) : null,
         ranking: 0,
         avaliacoes: 4.5,
         avaliacoesCount: 0,
@@ -185,8 +195,8 @@ export const useBuscarProdutos = (termo) => {
         descricaoLonga: produto.description,
         preco: produto.price,
         precoFormatado: `R$ ${produto.price.toFixed(2).replace('.', ',')}`,
-        categoria: produto.category,
-        imagem: produto.image_url,
+        categoria: produto.category ? produto.category.charAt(0).toUpperCase() + produto.category.slice(1) : 'Outros',
+        imagem: produto.image_url ? (produto.image_url.startsWith('http') ? produto.image_url : `https://eucwoxjmjfqylyrqunwk.supabase.co/storage/v1/object/public/Products/${produto.image_url.replace(/^\/products\//, '')}`) : null,
         ranking: 0,
         avaliacoes: 4.5,
         avaliacoesCount: 0,

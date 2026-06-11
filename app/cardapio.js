@@ -13,7 +13,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS, ANIMATIONS } from '../constants/theme';
-import { getProdutosPorCategoria, getCategorias, buscarProdutos, PRODUTOS } from '../data/produtos';
+import { useProdutos, useProdutosPorCategoria, useBuscarProdutos } from './hooks/useProdutos';
 
 function PressableScale({ children, onPress, style }) {
   const scale = useRef(new Animated.Value(1)).current;
@@ -53,24 +53,30 @@ function PressableScale({ children, onPress, style }) {
  */
 function ProdutoCard({ produto }) {
   const router = useRouter();
-  const [imageLoaded, setImageLoaded] = useState(false);
+  const [useFallback, setUseFallback] = useState(false);
+
+  const FALLBACKS = {
+    batatas: 'https://images.unsplash.com/photo-1518013391915-e40643a1bce1?w=400',
+    batata: 'https://images.unsplash.com/photo-1518013391915-e40643a1bce1?w=400',
+    bebidas: 'https://images.unsplash.com/photo-1544145945-f904253d0c7b?w=400',
+    bebida: 'https://images.unsplash.com/photo-1544145945-f904253d0c7b?w=400',
+    macarrao: 'https://images.unsplash.com/photo-1551183053-bf91a1d81141?w=400',
+  };
+
+  const imageSource = useFallback
+    ? { uri: FALLBACKS[produto.categoria?.toLowerCase()] || FALLBACKS.batatas }
+    : { uri: produto.imagem };
 
   return (
     <PressableScale
       style={s.card}
       onPress={() => router.push(`/produto/${produto.id}`)}
     >
-      {/* Imagem com Skeleton Loading */}
       <View style={s.cardImgContainer}>
-        {!imageLoaded && (
-          <View style={[s.cardImg, s.skeleton]}>
-            <ActivityIndicator size="large" color={COLORS.primary} />
-          </View>
-        )}
         <Image
-          source={{ uri: produto.imagem }}
-          style={[s.cardImg, { display: imageLoaded ? 'flex' : 'none' }]}
-          onLoad={() => setImageLoaded(true)}
+          source={imageSource}
+          style={s.cardImg}
+          onError={() => setUseFallback(true)}
         />
 
         {/* Badge de Avaliação */}
@@ -114,31 +120,33 @@ function ProdutoCard({ produto }) {
 /**
  * Tela de Cardápio
  */
+import { useScrollHandler } from './_layout';
+
 export default function Cardapio() {
   const [categoriaAtiva, setCategoriaAtiva] = useState('Todas');
   const [searchQuery, setSearchQuery] = useState('');
   const router = useRouter();
-  const scrollHandlerRef = useRef(null);
+  const onScroll = useScrollHandler();
 
-  const categorias = getCategorias();
+  const categorias = ['Todas', 'Batatas', 'Macarrão', 'Bebidas'];
 
-  // Filtrar produtos por categoria e busca
-  let produtosFiltrados = getProdutosPorCategoria(categoriaAtiva);
+  const { produtos: todosProdutos, loading: loadingTodos } = useProdutos();
+  const { produtos: produtosPorCategoria, loading: loadingCategoria } = useProdutosPorCategoria(categoriaAtiva);
+  const { produtos: produtosBuscados, loading: loadingBusca } = useBuscarProdutos(searchQuery);
+
+  let produtosFiltrados = [];
+  let loading = false;
 
   if (searchQuery.trim()) {
-    produtosFiltrados = buscarProdutos(searchQuery);
+    produtosFiltrados = produtosBuscados;
+    loading = loadingBusca;
+  } else if (categoriaAtiva === 'Todas') {
+    produtosFiltrados = todosProdutos;
+    loading = loadingTodos;
+  } else {
+    produtosFiltrados = produtosPorCategoria;
+    loading = loadingCategoria;
   }
-
-  const handleScroll = (event) => {
-    if (scrollHandlerRef.current) {
-      scrollHandlerRef.current(event);
-    }
-  };
-
-  // Registrar o handler na montagem
-  useEffect(() => {
-    scrollHandlerRef.current = global.headerScrollHandler || null;
-  }, []);
 
   return (
     <View style={s.container}>
@@ -191,22 +199,29 @@ export default function Cardapio() {
       </View>
 
       {/* ===== LISTA DE PRODUTOS ===== */}
-      <FlatList
-        data={produtosFiltrados}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <ProdutoCard produto={item} />}
-        contentContainerStyle={s.listaContent}
-        showsVerticalScrollIndicator={false}
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
-        ListEmptyComponent={() => (
-          <View style={s.empty}>
-            <Ionicons name="search" size={48} color={COLORS.primary} />
-            <Text style={s.emptyTitle}>Nenhum produto encontrado</Text>
-            <Text style={s.emptyDesc}>Tente outra busca ou categoria.</Text>
-          </View>
-        )}
-      />
+      {loading ? (
+        <View style={s.empty}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={s.emptyTitle}>Carregando cardápio...</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={produtosFiltrados}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => <ProdutoCard produto={item} />}
+          contentContainerStyle={[s.listaContent, { paddingTop: 150 }]}
+          showsVerticalScrollIndicator={false}
+          onScroll={typeof onScroll === 'function' ? onScroll() : null}
+          scrollEventThrottle={16}
+          ListEmptyComponent={() => (
+            <View style={s.empty}>
+              <Ionicons name="search" size={48} color={COLORS.primary} />
+              <Text style={s.emptyTitle}>Nenhum produto encontrado</Text>
+              <Text style={s.emptyDesc}>Tente outra busca ou categoria.</Text>
+            </View>
+          )}
+        />
+      )}
     </View>
   );
 }
@@ -316,13 +331,14 @@ const s = StyleSheet.create({
   // ===== CARD DE PRODUTO =====
   card: {
     backgroundColor: COLORS.backgroundCard,
-    borderRadius: RADIUS.lg,
+    borderRadius: RADIUS.xl,
     borderWidth: 1,
     borderColor: COLORS.border,
     flexDirection: 'row',
     overflow: 'hidden',
-    height: 140,
-    ...SHADOWS.md,
+    height: 120,
+    marginBottom: SPACING[2],
+    ...SHADOWS.sm,
   },
 
   // ===== IMAGEM =====

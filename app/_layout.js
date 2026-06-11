@@ -1,5 +1,5 @@
 import { Stack, useRouter, usePathname } from 'expo-router';
-import { View, Text, StatusBar, StyleSheet, Pressable, Modal, ScrollView, TextInput, Animated } from 'react-native';
+import { View, Text, StatusBar, StyleSheet, Pressable, Modal, ScrollView, TextInput, Animated, Image } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useRef, useEffect } from 'react';
@@ -49,113 +49,311 @@ export function CartProvider({ children }) {
 
 export const useCart = () => useContext(CartContext);
 
-/* ============ MODAL DE ENDEREÇO ============ */
-function AddressModal({ visible, onClose, onSelectAddress }) {
-  const [addresses, setAddresses] = useState([
-    { id: 1, label: 'Casa', address: 'Rua das Flores, 123 - Iacanga, SP', main: true },
-    { id: 2, label: 'Trabalho', address: 'Av. Principal, 456 - Iacanga, SP', main: false },
-  ]);
-  const [newAddress, setNewAddress] = useState('');
-  const [showForm, setShowForm] = useState(false);
+/* ============ MODAL DE ENDEREÇO — removido ============
+ * O sistema de endereços agora vive em app/addresses.js
+ * e usa dados reais do Supabase.
+ * O header redireciona para /addresses ao clicar.
+ */
 
-  const handleAddAddress = () => {
-    if (newAddress.trim()) {
-      const newItem = {
-        id: addresses.length + 1,
-        label: `Endereço ${addresses.length + 1}`,
-        address: newAddress,
-        main: false,
-      };
-      setAddresses([...addresses, newItem]);
-      setNewAddress('');
-      setShowForm(false);
+
+/* ============ DRAWER MENU LATERAL ============ */
+function MenuDrawer({ visible, onClose, user, router }) {
+  const translateX = useRef(new Animated.Value(-320)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (visible) {
+      Animated.parallel([
+        Animated.timing(translateX, { toValue: 0, duration: 280, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 1, duration: 280, useNativeDriver: true }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(translateX, { toValue: -320, duration: 220, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0, duration: 220, useNativeDriver: true }),
+      ]).start();
     }
-  };
+  }, [visible]);
 
-  const handleSelectAddress = (address) => {
-    onSelectAddress(address);
-    onClose();
-  };
+  if (!visible) return null;
+
+  const items = [
+    { icon: 'home-outline',       label: 'Início',        route: '/' },
+    { icon: 'restaurant-outline', label: 'Cardápio',      route: '/cardapio' },
+    { icon: 'receipt-outline',    label: 'Meus Pedidos',  route: '/pedidos' },
+    { icon: 'person-outline',     label: 'Perfil',        route: '/profile' },
+    { icon: 'help-circle-outline',label: 'Ajuda',         route: '/ajuda' },
+  ];
 
   return (
-    <Modal visible={visible} animationType="slide" transparent>
-      <SafeAreaView style={s.modalContainer}>
-        <View style={s.modalHeader}>
-          <Pressable onPress={onClose}>
-            <Ionicons name="close" size={28} color="#1A1A1A" />
-          </Pressable>
-          <Text style={s.modalTitle}>Endereço de Entrega</Text>
-          <View style={{ width: 28 }} />
-        </View>
+    <View style={sd.overlay}>
+      {/* Backdrop */}
+      <Animated.View style={[sd.backdrop, { opacity }]}>
+        <Pressable style={{ flex: 1 }} onPress={onClose} />
+      </Animated.View>
 
-        <ScrollView style={s.modalContent} showsVerticalScrollIndicator={false}>
-          {addresses.map((addr) => (
-            <Pressable
-              key={addr.id}
-              style={s.addressItem}
-              onPress={() => handleSelectAddress(addr)}
-            >
-              <View style={s.addressItemLeft}>
-                <Ionicons name="location" size={24} color="#EA1D2C" />
-                <View style={s.addressItemText}>
-                  <Text style={s.addressItemLabel}>{addr.label}</Text>
-                  <Text style={s.addressItemAddress}>{addr.address}</Text>
-                </View>
-              </View>
-              {addr.main && <View style={s.mainBadge}><Text style={s.mainBadgeText}>Principal</Text></View>}
-            </Pressable>
-          ))}
-
-          {!showForm ? (
-            <Pressable style={s.addAddressBtn} onPress={() => setShowForm(true)}>
-              <Ionicons name="add-circle" size={24} color="#EA1D2C" />
-              <Text style={s.addAddressBtnText}>Adicionar novo endereço</Text>
-            </Pressable>
-          ) : (
-            <View style={s.addressForm}>
-              <TextInput
-                style={s.addressInput}
-                placeholder="Rua, número, complemento..."
-                placeholderTextColor="#A3A3A3"
-                value={newAddress}
-                onChangeText={setNewAddress}
+      {/* Drawer */}
+      <Animated.View style={[sd.drawer, { transform: [{ translateX }] }]}>
+        <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
+          {/* Header do drawer */}
+          <View style={sd.drawerHeader}>
+            <View style={sd.drawerLogo}>
+              <Image
+                source={{ uri: 'https://eucwoxjmjfqylyrqunwk.supabase.co/storage/v1/object/public/logo/logo.png' }}
+                style={sd.drawerLogoImg}
+                resizeMode="contain"
               />
-              <View style={s.formButtons}>
-                <Pressable style={s.formBtnCancel} onPress={() => setShowForm(false)}>
-                  <Text style={s.formBtnCancelText}>Cancelar</Text>
-                </Pressable>
-                <Pressable style={s.formBtnSave} onPress={handleAddAddress}>
-                  <Text style={s.formBtnSaveText}>Salvar</Text>
-                </Pressable>
-              </View>
             </View>
-          )}
-        </ScrollView>
-      </SafeAreaView>
-    </Modal>
+            <View style={sd.drawerUserInfo}>
+              {user ? (
+                <>
+                  <Text style={sd.drawerUserName}>{user.email}</Text>
+                  <Text style={sd.drawerUserSub}>Bem-vindo de volta!</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={sd.drawerUserName}>Olá, visitante!</Text>
+                  <Pressable onPress={() => { onClose(); router.push('/auth/login'); }}>
+                    <Text style={sd.drawerLoginLink}>Entrar na conta →</Text>
+                  </Pressable>
+                </>
+              )}
+            </View>
+            <Pressable onPress={onClose} style={sd.drawerCloseBtn}>
+              <Ionicons name="close" size={22} color="#1A1A1A" />
+            </Pressable>
+          </View>
+
+          <View style={sd.drawerDivider} />
+
+          {/* Itens de navegação */}
+          <ScrollView style={sd.drawerItems} showsVerticalScrollIndicator={false}>
+            {items.map((item) => (
+              <Pressable
+                key={item.label}
+                style={sd.drawerItem}
+                onPress={() => { onClose(); router.push(item.route); }}
+              >
+                <View style={sd.drawerItemIcon}>
+                  <Ionicons name={item.icon} size={20} color="#FFB800" />
+                </View>
+                <Text style={sd.drawerItemLabel}>{item.label}</Text>
+                <Ionicons name="chevron-forward" size={16} color="#CCCCCC" />
+              </Pressable>
+            ))}
+          </ScrollView>
+
+          <View style={sd.drawerDivider} />
+
+          {/* Footer */}
+          <View style={sd.drawerFooter}>
+            <Text style={sd.drawerFooterText}>Batatop Delivery · Iacanga, SP</Text>
+          </View>
+        </SafeAreaView>
+      </Animated.View>
+    </View>
   );
 }
 
-/* ============ SCROLL CONTEXT PARA HEADER ============ */
-const ScrollContext = createContext({
-  onScroll: () => {},
+const sd = StyleSheet.create({
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2000,
+    flexDirection: 'row',
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  drawer: {
+    width: 290,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 4, height: 0 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 20,
+  },
+  drawerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 16,
+    gap: 12,
+  },
+  drawerLogo: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#FFF8E7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  drawerLogoImg: {
+    width: 48,
+    height: 48,
+  },
+  drawerUserInfo: {
+    flex: 1,
+  },
+  drawerUserName: {
+    color: '#1A1A1A',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  drawerUserSub: {
+    color: '#888',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  drawerLoginLink: {
+    color: '#FFB800',
+    fontWeight: '700',
+    fontSize: 13,
+    marginTop: 2,
+  },
+  drawerCloseBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  drawerDivider: {
+    height: 1,
+    backgroundColor: '#F0F0F0',
+    marginHorizontal: 20,
+  },
+  drawerItems: {
+    flex: 1,
+    paddingTop: 8,
+  },
+  drawerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    gap: 14,
+  },
+  drawerItemIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: '#FFF8E7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  drawerItemLabel: {
+    flex: 1,
+    color: '#1A1A1A',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  drawerFooter: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  drawerFooterText: {
+    color: '#BBBBBB',
+    fontSize: 12,
+  },
 });
 
-export const useScrollHandler = () => useContext(ScrollContext);
+/* ============ SCROLL CONTEXT PARA HEADER ============ */
+// Compartilha o Animated.Value do scrollY com todas as telas
+// Cada tela usa: const onScroll = useScrollHandler()
+// e passa pro ScrollView: onScroll={onScroll} scrollEventThrottle={16}
+const ScrollYContext = createContext(new Animated.Value(0));
+
+export const useScrollHandler = () => {
+  const scrollY = useContext(ScrollYContext);
+  // Retorna função normal compatível com onScroll do ScrollView
+  return (event) => {
+    const y = event?.nativeEvent?.contentOffset?.y ?? 0;
+    scrollY.setValue(y);
+  };
+};
+
+import { supabase } from '../supabaseConfig';
 
 /* ============ HEADER GLOBAL COM HIDE/SHOW SCROLL ============ */
-function Header({ onScrollHandler }) {
-  const [selectedAddress, setSelectedAddress] = useState({
-    label: 'Casa',
-    address: 'Rua das Flores, 123',
-  });
-  const [addressModalVisible, setAddressModalVisible] = useState(false);
+function Header() {
+  const [selectedAddress, setSelectedAddress] = useState('Selecione um endereço');
+  const [drawerVisible, setDrawerVisible] = useState(false);
+  const [user, setUser] = useState(null);
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const headerTranslateY = useRef(new Animated.Value(0)).current;
+  const authRowOpacity = useRef(new Animated.Value(1)).current;
+  const authRowHeight = useRef(new Animated.Value(1)).current; // 1=visível 0=escondido
   const router = useRouter();
   const { totalItems } = useCart();
-  const lastScrollY = useRef(0);
-  const isScrolling = useRef(false);
+
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const u = session?.user ?? null;
+      setUser(u);
+      if (u) {
+        fetchDefaultAddress(u.id);
+        // Já começa escondido se logado
+        authRowOpacity.setValue(0);
+        authRowHeight.setValue(0);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      const u = session?.user ?? null;
+      setUser(u);
+      if (u) {
+        fetchDefaultAddress(u.id);
+        // Esconde authRow com animação ao logar
+        Animated.parallel([
+          Animated.timing(authRowOpacity, { toValue: 0, duration: 250, useNativeDriver: false }),
+          Animated.timing(authRowHeight,  { toValue: 0, duration: 250, useNativeDriver: false }),
+        ]).start();
+      } else {
+        setSelectedAddress('Selecione um endereço');
+        // Mostra authRow com animação ao deslogar (se não estiver em /addresses)
+        if (!isAddressPage) {
+          Animated.parallel([
+            Animated.timing(authRowOpacity, { toValue: 1, duration: 300, useNativeDriver: false }),
+            Animated.timing(authRowHeight,  { toValue: 1, duration: 300, useNativeDriver: false }),
+          ]).start();
+        }
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  async function fetchDefaultAddress(userId) {
+    try {
+      const { data } = await supabase
+        .from('addresses')
+        .select('street, number, city')
+        .eq('user_id', userId)
+        .eq('is_default', true)
+        .single();
+      if (data) {
+        setSelectedAddress(`${data.street}, ${data.number}`);
+      } else {
+        // Pega o mais recente se não tiver padrão definido
+        const { data: any } = await supabase
+          .from('addresses')
+          .select('street, number')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+        if (any) setSelectedAddress(`${any.street}, ${any.number}`);
+      }
+    } catch {
+      // sem endereço cadastrado ainda
+    }
+  }
 
   const handlePressIn = () => {
     Animated.spring(scaleAnim, { toValue: 0.98, useNativeDriver: true }).start();
@@ -165,60 +363,102 @@ function Header({ onScrollHandler }) {
     Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true }).start();
   };
 
-  // Função para lidar com scroll
-  const handleScroll = (event) => {
-    const currentScrollY = event.nativeEvent.contentOffset.y;
-    const scrollDelta = currentScrollY - lastScrollY.current;
+  // Pega o scrollY compartilhado via context e anima o header
+  const scrollY = useContext(ScrollYContext);
+  const prevScrollY = useRef(0);
+  const headerVisible = useRef(true);
 
-    // Se scrollou para baixo mais de 5px, esconde o header
-    if (scrollDelta > 5 && !isScrolling.current) {
-      isScrolling.current = true;
-      Animated.timing(headerTranslateY, {
-        toValue: -200, // Esconde o header
-        duration: 300,
-        useNativeDriver: true,
-      }).start(() => {
-        isScrolling.current = false;
-      });
-    }
-    // Se scrollou para cima mais de 5px, mostra o header
-    else if (scrollDelta < -5 && isScrolling.current === false) {
-      isScrolling.current = true;
-      Animated.timing(headerTranslateY, {
-        toValue: 0, // Mostra o header
-        duration: 300,
-        useNativeDriver: true,
-      }).start(() => {
-        isScrolling.current = false;
-      });
-    }
-
-    lastScrollY.current = currentScrollY;
-  };
-
-  // Passar o handler para o contexto
   useEffect(() => {
-    if (onScrollHandler) {
-      onScrollHandler(handleScroll);
+    const id = scrollY.addListener(({ value }) => {
+      const delta = value - prevScrollY.current;
+      prevScrollY.current = value;
+
+      if (value <= 10) {
+        // Topo da página — sempre mostra
+        if (!headerVisible.current) {
+          headerVisible.current = true;
+          Animated.spring(headerTranslateY, {
+            toValue: 0, useNativeDriver: true,
+            tension: 80, friction: 12,
+          }).start();
+        }
+      } else if (delta > 6 && headerVisible.current) {
+        // Scrollando pra cima (conteúdo subindo) — esconde
+        headerVisible.current = false;
+        Animated.timing(headerTranslateY, {
+          toValue: -160, duration: 220,
+          useNativeDriver: true,
+        }).start();
+      } else if (delta < -6 && !headerVisible.current) {
+        // Scrollando pra baixo (conteúdo descendo) — mostra
+        headerVisible.current = true;
+        Animated.spring(headerTranslateY, {
+          toValue: 0, useNativeDriver: true,
+          tension: 80, friction: 12,
+        }).start();
+      }
+    });
+    return () => scrollY.removeListener(id);
+  }, []);
+
+  const pathname = usePathname();
+  const isAuthPage = pathname.includes('auth');
+  const isProdutoPage = pathname.includes('produto');
+  const isAddressPage = pathname.includes('addresses');
+
+  // Anima o authRow pra sumir/aparecer quando entra/sai de /addresses
+  useEffect(() => {
+    if (isAddressPage || user) {
+      // Esconde: dentro de /addresses OU usuário logado
+      Animated.parallel([
+        Animated.timing(authRowOpacity, { toValue: 0, duration: 250, useNativeDriver: false }),
+        Animated.timing(authRowHeight,  { toValue: 0, duration: 250, useNativeDriver: false }),
+      ]).start();
+    } else {
+      // Mostra: fora de /addresses E não logado
+      Animated.parallel([
+        Animated.timing(authRowOpacity, { toValue: 1, duration: 300, useNativeDriver: false }),
+        Animated.timing(authRowHeight,  { toValue: 1, duration: 300, useNativeDriver: false }),
+      ]).start();
     }
-  }, [onScrollHandler]);
+  }, [isAddressPage, user]);
+
+  if (isAuthPage || isProdutoPage) return null;
 
   return (
     <>
-      <Animated.View style={[s.headerSafeAnimated, { transform: [{ translateY: headerTranslateY }] }]}>
+      <Animated.View style={[s.headerSafeAnimated, { transform: [{ translateY: headerTranslateY }], position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1000 }]}>
         <SafeAreaView style={s.headerSafe} edges={['top']}>
-          <View style={s.headerRow}>
-            <View style={s.logoRow}>
-              <View style={s.logoBg}>
-                <Text style={s.logoText}>🍟</Text>
-              </View>
-              <View>
-                <Text style={s.logoTitle}>Batata Top</Text>
-                <Text style={s.logoSubtitle}>Iacanga - SP</Text>
-              </View>
-            </View>
+          {/* ── Linha 1: endereço ── */}
+          <View style={s.addressRow}>
+            <Pressable style={s.menuBtn} onPress={() => setDrawerVisible(true)}>
+              <View style={s.menuBar} />
+              <View style={[s.menuBar, { width: 16 }]} />
+              <View style={s.menuBar} />
+            </Pressable>
+
+            <Animated.View style={[s.addressSelectorInline, { transform: [{ scale: scaleAnim }] }]}>
+              <Pressable
+                style={s.addressSelectorInnerRow}
+                onPress={() => router.push('/addresses')}
+                onPressIn={handlePressIn}
+                onPressOut={handlePressOut}
+              >
+                <Ionicons name="location-sharp" size={18} color="#FFB800" />
+                <View style={s.addressSelectorTextInline}>
+                  <Text style={s.addressSelectorLabelInline}>Entregando em</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Text style={s.addressSelectorValueInline} numberOfLines={1}>
+                      {selectedAddress}
+                    </Text>
+                    <Ionicons name="chevron-down" size={14} color="#1A1A1A" />
+                  </View>
+                </View>
+              </Pressable>
+            </Animated.View>
+
             <Pressable style={s.cartBtn} onPress={() => router.push('/cart')}>
-              <Ionicons name="cart-outline" size={26} color="#FFFFFF" />
+              <Ionicons name="cart-outline" size={28} color="#1A1A1A" />
               {totalItems > 0 && (
                 <View style={s.cartBadge}>
                   <Text style={s.cartBadgeText}>{totalItems}</Text>
@@ -227,32 +467,33 @@ function Header({ onScrollHandler }) {
             </Pressable>
           </View>
 
-          <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-            <Pressable
-              style={s.addressSelector}
-              onPress={() => setAddressModalVisible(true)}
-              onPressIn={handlePressIn}
-              onPressOut={handlePressOut}
-            >
-              <View style={s.addressSelectorLeft}>
-                <Ionicons name="location-outline" size={20} color="#EA1D2C" />
-                <View style={s.addressSelectorText}>
-                  <Text style={s.addressSelectorLabel}>Entregando em</Text>
-                  <Text style={s.addressSelectorValue} numberOfLines={1}>
-                    {selectedAddress.address}
-                  </Text>
-                </View>
-              </View>
-              <Ionicons name="chevron-down" size={20} color="#EA1D2C" />
+          {/* ── Linha 2: botões de auth — some animado em /addresses ou logado ── */}
+          <Animated.View style={[
+            s.authRow,
+            {
+              opacity: authRowOpacity,
+              maxHeight: authRowHeight.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, 56],
+              }),
+              overflow: 'hidden',
+            }
+          ]}>
+            <Pressable style={s.registerHeaderBtn} onPress={() => router.push('/auth/register')}>
+              <Text style={s.registerHeaderBtnText}>Criar conta</Text>
+            </Pressable>
+            <Pressable style={s.loginBtn} onPress={() => router.push('/auth/login')}>
+              <Text style={s.loginBtnText}>Entrar</Text>
             </Pressable>
           </Animated.View>
         </SafeAreaView>
       </Animated.View>
 
-      <AddressModal
-        visible={addressModalVisible}
-        onClose={() => setAddressModalVisible(false)}
-        onSelectAddress={setSelectedAddress}
+      <MenuDrawer
+        visible={drawerVisible}
+        onClose={() => setDrawerVisible(false)}
+        user={user}
+        router={router}
       />
     </>
   );
@@ -262,6 +503,9 @@ function Header({ onScrollHandler }) {
 function BottomTabBar() {
   const router = useRouter();
   const pathname = usePathname();
+
+  // Não exibe tab bar na tela de detalhe do produto
+  if (pathname.includes('produto')) return null;
 
   const tabs = [
     { name: 'index', label: 'Início', icon: 'home', iconOutline: 'home-outline' },
@@ -288,7 +532,7 @@ function BottomTabBar() {
             <Ionicons
               name={active ? tab.icon : tab.iconOutline}
               size={24}
-              color={active ? '#EA1D2C' : '#A3A3A3'}
+              color={active ? '#FFB800' : '#A3A3A3'}
             />
             <Text style={[s.tabLabel, active && s.tabLabelActive]}>
               {tab.label}
@@ -302,19 +546,16 @@ function BottomTabBar() {
 }
 
 /* ============ LAYOUT ROOT ============ */
+const rootScrollY = new Animated.Value(0);
+
 export default function RootLayout() {
-  const scrollHandlerRef = useRef(null);
-
-  const setScrollHandler = (handler) => {
-    scrollHandlerRef.current = handler;
-  };
-
   return (
     <CartProvider>
+      <ScrollYContext.Provider value={rootScrollY}>
       <SafeAreaProvider>
-        <StatusBar backgroundColor="#EA1D2C" barStyle="light-content" />
+        <StatusBar backgroundColor="#FFB800" barStyle="dark-content" />
         <View style={{ flex: 1 }}>
-          <Header onScrollHandler={setScrollHandler} />
+          <Header />
           <View style={{ flex: 1 }}>
             <Stack
               screenOptions={{
@@ -327,6 +568,7 @@ export default function RootLayout() {
           <BottomTabBar />
         </View>
       </SafeAreaProvider>
+      </ScrollYContext.Provider>
     </CartProvider>
   );
 }
@@ -338,66 +580,134 @@ const s = StyleSheet.create({
     overflow: 'hidden',
   },
   headerSafe: {
-    backgroundColor: '#EA1D2C',
+    backgroundColor: '#FFB800',
   },
-  headerRow: {
+
+  // Linha 1 — hambúrguer + endereço + carrinho
+  addressRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 8,
+    gap: 8,
   },
-  logoRow: {
+
+  // Linha 2 — botões auth (some quando logado)
+  authRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    gap: 8,
   },
-  logoBg: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: '#FFFFFF',
+
+  menuBtn: {
+    width: 36,
+    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 5,
+    flexShrink: 0,
   },
-  logoText: {
-    fontSize: 24,
+  menuBar: {
+    width: 22,
+    height: 2.5,
+    backgroundColor: '#1A1A1A',
+    borderRadius: 2,
   },
-  logoTitle: {
-    color: '#FFFFFF',
-    fontWeight: '800',
-    fontSize: 18,
-    letterSpacing: -0.5,
+
+  // Endereço inline
+  addressSelectorInline: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
   },
-  logoSubtitle: {
-    color: 'rgba(255,255,255,0.8)',
+  addressSelectorInnerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  addressSelectorTextInline: {
+    flex: 1,
+    overflow: 'hidden',
+  },
+  addressSelectorLabelInline: {
+    color: '#888',
     fontSize: 11,
     fontWeight: '500',
-    marginTop: 2,
   },
+  addressSelectorValueInline: {
+    color: '#1A1A1A',
+    fontSize: 14,
+    fontWeight: '800',
+    flexShrink: 1,
+  },
+
+  // Carrinho
   cartBtn: {
     position: 'relative',
-    padding: 8,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
   cartBadge: {
     position: 'absolute',
     top: 2,
     right: 2,
-    backgroundColor: '#FFB500',
+    backgroundColor: '#E63535',
     borderRadius: 10,
-    minWidth: 20,
-    height: 20,
+    minWidth: 18,
+    height: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#EA1D2C',
+    borderWidth: 1.5,
+    borderColor: '#FFB800',
   },
   cartBadgeText: {
-    color: '#1A1A1A',
+    color: '#FFFFFF',
     fontWeight: 'bold',
-    fontSize: 11,
+    fontSize: 10,
   },
+
+  // Botões auth
+  loginBtn: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  loginBtnText: {
+    color: '#B8860B',
+    fontWeight: '800',
+    fontSize: 15,
+  },
+  registerHeaderBtn: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.6)',
+  },
+  registerHeaderBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 15,
+  },
+
+  // Estilos antigos mantidos por compatibilidade (modal de endereço usa alguns)
   addressSelector: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -420,20 +730,9 @@ const s = StyleSheet.create({
     gap: 12,
     flex: 1,
   },
-  addressSelectorText: {
-    flex: 1,
-  },
-  addressSelectorLabel: {
-    color: '#6B6B6B',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  addressSelectorValue: {
-    color: '#1A1A1A',
-    fontSize: 14,
-    fontWeight: '700',
-    marginTop: 2,
-  },
+  addressSelectorText: { flex: 1 },
+  addressSelectorLabel: { color: '#6B6B6B', fontSize: 11, fontWeight: '600' },
+  addressSelectorValue: { color: '#1A1A1A', fontSize: 14, fontWeight: '700', marginTop: 2 },
 
   /* Bottom Tab Bar */
   tabBar: {
@@ -464,7 +763,7 @@ const s = StyleSheet.create({
     marginTop: 2,
   },
   tabLabelActive: {
-    color: '#EA1D2C',
+    color: '#FFB800',
     fontWeight: '700',
   },
   tabIndicator: {
@@ -472,7 +771,7 @@ const s = StyleSheet.create({
     top: -8,
     width: 40,
     height: 3,
-    backgroundColor: '#EA1D2C',
+    backgroundColor: '#FFB800',
     borderRadius: 2,
   },
 
@@ -556,12 +855,12 @@ const s = StyleSheet.create({
     paddingVertical: 16,
     marginVertical: 16,
     borderWidth: 2,
-    borderColor: '#EA1D2C',
+    borderColor: '#FFB800',
     borderRadius: 14,
-    backgroundColor: 'rgba(234, 29, 44, 0.05)',
+    backgroundColor: 'rgba(255, 184, 0, 0.08)',
   },
   addAddressBtnText: {
-    color: '#EA1D2C',
+    color: '#FFB800',
     fontWeight: '700',
     fontSize: 14,
   },
@@ -600,7 +899,7 @@ const s = StyleSheet.create({
     flex: 1,
     paddingVertical: 12,
     borderRadius: 10,
-    backgroundColor: '#EA1D2C',
+    backgroundColor: '#FFB800',
     alignItems: 'center',
   },
   formBtnSaveText: {

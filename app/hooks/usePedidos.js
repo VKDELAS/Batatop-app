@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { supabase } from './supabaseConfig';
+import { supabase } from '../../utils/supabase';
 
 export const usePedidos = () => {
   const [loading, setLoading] = useState(false);

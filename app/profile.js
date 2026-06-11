@@ -1,32 +1,26 @@
-import { View, Text, ScrollView, StyleSheet, Pressable, Image, Switch, Alert, TextInput, Modal } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Pressable, Image, Switch, Alert, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { supabase } from '../supabaseConfig';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 
-function ProfileHeader({ user, onEditPress }) {
+function ProfileHeader({ user }) {
   return (
     <View style={s.headerContainer}>
       <View style={s.profileTop}>
         <View style={s.profileImageWrapper}>
           <Image
-            source={{ uri: 'https://api.dicebear.com/7.x/avataaars/png?seed=Felix' }}
+            source={{ uri: user?.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/png?seed=${user?.email || 'Guest'}` }}
             style={s.profileImage}
           />
-          <Pressable style={s.editImageBtn} onPress={onEditPress}>
-            <Ionicons name="camera" size={16} color={COLORS.white} />
-          </Pressable>
         </View>
         <View style={s.userInfo}>
-          <Text style={s.userName}>{user.name}</Text>
-          <Text style={s.userEmail}>{user.email}</Text>
-          <Text style={s.userPhone}>{user.phone}</Text>
+          <Text style={s.userName}>{user?.user_metadata?.full_name || 'Usuário Batatop'}</Text>
+          <Text style={s.userEmail}>{user?.email || 'Conectado via Supabase'}</Text>
         </View>
       </View>
-      <Pressable style={s.editProfileBtn} onPress={onEditPress}>
-        <Text style={s.editProfileBtnText}>Editar Perfil</Text>
-      </Pressable>
+
     </View>
   );
 }
@@ -64,61 +58,92 @@ function Section({ title, children }) {
 
 export default function Profile() {
   const router = useRouter();
-  const [user, setUser] = useState({
-    name: 'Cliente Batatop',
-    email: 'cliente@batatop.com.br',
-    phone: '(14) 99999-9999',
-  });
-  const [notifications, setNotifications] = useState(true);
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [defaultAddress, setDefaultAddress] = useState(null);
 
-  const handleLogout = () => {
+  useEffect(() => {
+    checkUser();
+  }, []);
+
+  async function checkUser() {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const u = session?.user || null;
+      setUser(u);
+
+      if (u) {
+        const { data } = await supabase
+          .from('addresses')
+          .select('street, number, city, state')
+          .eq('user_id', u.id)
+          .eq('is_default', true)
+          .single();
+        if (data) {
+          setDefaultAddress(`${data.street}, ${data.number} · ${data.city}/${data.state}`);
+        } else {
+          // nenhum padrão, pega o mais recente
+          const { data: any } = await supabase
+            .from('addresses')
+            .select('street, number, city, state')
+            .eq('user_id', u.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+          if (any) setDefaultAddress(`${any.street}, ${any.number} · ${any.city}/${any.state}`);
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao verificar usuário:', error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const handleLogout = async () => {
     Alert.alert('Sair', 'Deseja realmente sair da sua conta?', [
       { text: 'Cancelar', style: 'cancel' },
-      { text: 'Sair', style: 'destructive', onPress: () => router.replace('/') }
+      { 
+        text: 'Sair', 
+        style: 'destructive', 
+        onPress: async () => {
+          await supabase.auth.signOut();
+          router.replace('/');
+        } 
+      }
     ]);
   };
 
+  if (loading) {
+    return (
+      <View style={s.loadingContainer}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+      </View>
+    );
+  }
+
+  if (!user) {
+    return (
+      <View style={s.notLoggedIn}>
+        <Ionicons name="person-circle-outline" size={80} color={COLORS.border} />
+        <Text style={s.notLoggedInTitle}>Você não está logado</Text>
+        <Text style={s.notLoggedInText}>Faça login para salvar seus endereços e ver seus pedidos.</Text>
+        <Pressable style={s.loginBtn} onPress={() => router.push('/auth/login')}>
+          <Text style={s.loginBtnText}>Fazer Login</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   return (
     <View style={s.container}>
-      <ScrollView style={s.scroll} showsVerticalScrollIndicator={false}>
-        <ProfileHeader user={user} onEditPress={() => Alert.alert('Editar', 'Funcionalidade em breve!')} />
-
-        <View style={s.statsGrid}>
-          <View style={s.statCard}>
-            <Text style={s.statValue}>12</Text>
-            <Text style={s.statLabel}>Pedidos</Text>
-          </View>
-          <View style={s.statCard}>
-            <Text style={s.statValue}>R$ 450</Text>
-            <Text style={s.statLabel}>Economia</Text>
-          </View>
-          <View style={s.statCard}>
-            <Text style={s.statValue}>4</Text>
-            <Text style={s.statLabel}>Cupons</Text>
-          </View>
-        </View>
+      <ScrollView style={s.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 120 }}>
+        <ProfileHeader user={user} />
 
         <Section title="Minha Conta">
-          <MenuItem icon="location-outline" label="Endereços" value="2 cadastrados" onPress={() => {}} />
-          <MenuItem icon="card-outline" label="Pagamentos" value="Cartão **** 1234" onPress={() => {}} />
-          <MenuItem icon="heart-outline" label="Favoritos" value="5 itens" isLast onPress={() => {}} />
-        </Section>
-
-        <Section title="Preferências">
-          <View style={s.switchItem}>
-            <View style={s.menuItemLeft}>
-              <View style={[s.menuIconBg, { backgroundColor: COLORS.info + '15' }]}>
-                <Ionicons name="notifications-outline" size={20} color={COLORS.info} />
-              </View>
-              <Text style={s.menuItemLabel}>Notificações Push</Text>
-            </View>
-            <Switch 
-              value={notifications} 
-              onValueChange={setNotifications}
-              trackColor={{ false: COLORS.border, true: COLORS.primary }}
-              thumbColor={COLORS.white}
-            />
-          </View>
+          <MenuItem icon="location-outline" label="Meus Endereços" value={defaultAddress || 'Gerenciar endereços de entrega'} onPress={() => router.push('/addresses')} />
+          <MenuItem icon="receipt-outline" label="Meus Pedidos" value="Histórico de compras" onPress={() => router.push('/pedidos')} />
+          <MenuItem icon="card-outline" label="Formas de Pagamento" isLast onPress={() => {}} />
         </Section>
 
         <Section title="Suporte">
@@ -126,12 +151,13 @@ export default function Profile() {
           <MenuItem icon="document-text-outline" label="Termos de Uso" isLast onPress={() => {}} />
         </Section>
 
+        {/* Botão sair — no fundo da tela */}
         <Pressable style={s.logoutBtn} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={20} color={COLORS.error} />
+          <Ionicons name="log-out-outline" size={18} color={COLORS.error} />
           <Text style={s.logoutBtnText}>Sair da Conta</Text>
         </Pressable>
 
-        <Text style={s.versionText}>Versão 2.0.1 (Build 42)</Text>
+        <Text style={s.versionText}>Batata Top v2.1.0</Text>
       </ScrollView>
     </View>
   );
@@ -140,7 +166,12 @@ export default function Profile() {
 const s = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.backgroundElevated,
+    backgroundColor: '#F8F9FA',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   scroll: {
     flex: 1,
@@ -148,10 +179,12 @@ const s = StyleSheet.create({
   headerContainer: {
     backgroundColor: COLORS.white,
     padding: SPACING[6],
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    marginHorizontal: SPACING[5],
+    marginBottom: SPACING[6],
+    borderRadius: RADIUS.xl,
     alignItems: 'center',
-    gap: SPACING[5],
+    gap: SPACING[4],
+    ...SHADOWS.sm,
   },
   profileTop: {
     flexDirection: 'row',
@@ -163,30 +196,17 @@ const s = StyleSheet.create({
     position: 'relative',
   },
   profileImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     backgroundColor: COLORS.borderLight,
-  },
-  editImageBtn: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    backgroundColor: COLORS.primary,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: COLORS.white,
   },
   userInfo: {
     flex: 1,
     gap: 2,
   },
   userName: {
-    fontSize: TYPOGRAPHY.sizes.lg,
+    fontSize: 18,
     fontWeight: '800',
     color: COLORS.text,
   },
@@ -194,46 +214,23 @@ const s = StyleSheet.create({
     fontSize: 13,
     color: COLORS.textSecondary,
   },
-  userPhone: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-  },
-  editProfileBtn: {
-    width: '100%',
-    paddingVertical: SPACING[3],
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+  logoutBtn: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING[2],
+    marginHorizontal: SPACING[5],
+    marginBottom: SPACING[4],
+    paddingVertical: SPACING[4],
+    borderRadius: RADIUS.xl,
+    borderWidth: 1.5,
+    borderColor: COLORS.error + '50',
+    backgroundColor: COLORS.error + '08',
   },
-  editProfileBtnText: {
-    color: COLORS.text,
+  logoutBtnText: {
+    color: COLORS.error,
     fontWeight: '700',
     fontSize: TYPOGRAPHY.sizes.sm,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    padding: SPACING[5],
-    gap: SPACING[3],
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: COLORS.white,
-    padding: SPACING[4],
-    borderRadius: RADIUS.lg,
-    alignItems: 'center',
-    gap: 2,
-    ...SHADOWS.sm,
-  },
-  statValue: {
-    fontSize: TYPOGRAPHY.sizes.base,
-    fontWeight: '800',
-    color: COLORS.primary,
-  },
-  statLabel: {
-    fontSize: 10,
-    color: COLORS.textSecondary,
-    fontWeight: '600',
   },
   section: {
     paddingHorizontal: SPACING[5],
@@ -278,7 +275,7 @@ const s = StyleSheet.create({
     gap: 2,
   },
   menuItemLabel: {
-    fontSize: TYPOGRAPHY.sizes.sm,
+    fontSize: 14,
     fontWeight: '700',
     color: COLORS.text,
   },
@@ -286,37 +283,40 @@ const s = StyleSheet.create({
     fontSize: 11,
     color: COLORS.textSecondary,
   },
-  switchItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: SPACING[4],
-    backgroundColor: COLORS.white,
-    borderRadius: RADIUS.xl,
-    ...SHADOWS.sm,
-  },
-  logoutBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginHorizontal: SPACING[5],
-    marginTop: SPACING[2],
-    paddingVertical: SPACING[4],
-    borderRadius: RADIUS.xl,
-    backgroundColor: COLORS.white,
-    borderWidth: 1,
-    borderColor: COLORS.error + '30',
-  },
-  logoutBtnText: {
-    color: COLORS.error,
-    fontWeight: '700',
-    fontSize: TYPOGRAPHY.sizes.sm,
-  },
   versionText: {
     textAlign: 'center',
     color: COLORS.textMuted,
     fontSize: 11,
     marginVertical: SPACING[8],
+  },
+  notLoggedIn: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+    backgroundColor: '#fff',
+  },
+  notLoggedInTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginTop: 20,
+    color: '#333',
+  },
+  notLoggedInText: {
+    textAlign: 'center',
+    color: '#666',
+    marginTop: 10,
+    marginBottom: 30,
+  },
+  loginBtn: {
+    backgroundColor: '#FFB500',
+    paddingHorizontal: 40,
+    paddingVertical: 15,
+    borderRadius: 12,
+  },
+  loginBtnText: {
+    fontWeight: 'bold',
+    color: '#333',
+    fontSize: 16,
   },
 });

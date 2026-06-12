@@ -17,9 +17,10 @@ import {
   View, Text, ScrollView, StyleSheet, Pressable,
   TextInput, ActivityIndicator, Alert,
   KeyboardAvoidingView, Platform, Animated, Modal,
-  FlatList, TouchableOpacity,
+  FlatList, TouchableOpacity, BackHandler,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useNavContext } from './_layout';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme';
@@ -42,10 +43,15 @@ function PressableScale({ children, onPress, style, disabled }) {
 }
 
 // ─── AuthGate ─────────────────────────────────────────────────────────────────
-function AuthGate() {
+function AuthGate({ onBack }) {
   const router = useRouter();
   return (
     <View style={g.wrap}>
+      {/* Botão voltar */}
+      <Pressable style={g.backBtn} onPress={onBack}>
+        <Ionicons name="arrow-back" size={20} color={COLORS.primary} />
+      </Pressable>
+
       <View style={g.sheet}>
         {/* Ícone */}
         <View style={g.iconWrap}>
@@ -469,6 +475,20 @@ function AddressForm({ onSave, onCancel, saving }) {
 // ─── Tela Principal ───────────────────────────────────────────────────────────
 export default function Addresses() {
   const [user, setUser] = useState(null);
+  const router = useRouter();
+  const { lastRoute, setAnimation } = useNavContext();
+
+  const handleBack = () => {
+    setAnimation('slide_from_left');
+    router.replace(lastRoute || '/');
+    return true; // impede o back padrão do Android
+  };
+
+  // Intercepta o botão físico/gesto de voltar do Android
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', handleBack);
+    return () => sub.remove();
+  }, [lastRoute]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -548,7 +568,7 @@ export default function Addresses() {
     ]);
   };
 
-  if (!user) return <AuthGate />;
+  if (!user) return <AuthGate onBack={handleBack} />;
 
   return (
     <KeyboardAvoidingView
@@ -557,6 +577,9 @@ export default function Addresses() {
     >
       {/* Cabeçalho fixo */}
       <View style={s.header}>
+        <Pressable style={s.backBtn} onPress={handleBack}>
+          <Ionicons name="arrow-back" size={22} color={COLORS.primary} />
+        </Pressable>
         <Text style={s.headerTitle}>Endereço de Entrega</Text>
         {!showForm && (
           <Pressable style={s.addBtnHeader} onPress={() => setShowForm(true)}>
@@ -622,6 +645,22 @@ const g = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: SPACING[8],
+    paddingTop: 130, // espaço pro header global
+  },
+  backBtn: {
+    position: 'absolute',
+    top: 140,
+    left: SPACING[5],
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: COLORS.primary + '18',
+    borderWidth: 2, borderColor: COLORS.primary + '50',
+    alignItems: 'center', justifyContent: 'center',
+    // sombra suave
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    elevation: 3,
   },
   sheet: {
     width: '100%',
@@ -912,6 +951,12 @@ const s = StyleSheet.create({
     letterSpacing: -0.3,
   },
   addBtnHeader: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: COLORS.primary + '15',
+    borderWidth: 1.5, borderColor: COLORS.primary + '40',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  backBtn: {
     width: 36, height: 36, borderRadius: 18,
     backgroundColor: COLORS.primary + '15',
     borderWidth: 1.5, borderColor: COLORS.primary + '40',

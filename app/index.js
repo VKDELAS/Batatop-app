@@ -7,6 +7,7 @@ import {
   Pressable,
   ActivityIndicator,
   Image,
+  ImageBackground,
   FlatList,
   ToastAndroid,
   Platform,
@@ -18,7 +19,7 @@ import { useState, useRef } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { useProdutos } from './hooks/useProdutos';
-import { useScrollHandler } from './_layout';
+import { useScrollHandler, useHeaderHeight } from './_layout';
 
 // ─── Pressable com scale ───────────────────────────────────────────────────────
 function PressableScale({ children, onPress, style }) {
@@ -187,16 +188,10 @@ export default function Home() {
   const router = useRouter();
   const { produtos, loading } = useProdutos();
   const onScroll = useScrollHandler(); // retorna Animated.event pronto
+  const headerHeight = useHeaderHeight(); // altura real do header
 
   const maisPedidos = produtos.slice(0, 4);
   const destaques = produtos.slice(0, 6);
-
-  const CATEGORIAS = [
-    { label: 'Batatas', icon: 'flame-outline' },
-    { label: 'Macarrão', icon: 'restaurant-outline' },
-    { label: 'Bebidas', icon: 'wine-outline' },
-    { label: 'Promoções', icon: 'pricetag-outline' },
-  ];
 
   const CUPONS = [
     { codigo: 'BATATOP15', desconto: '15% OFF', descricao: 'na primeira compra' },
@@ -208,57 +203,65 @@ export default function Home() {
       <ScrollView
         style={s.scroll}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: SPACING[10], paddingTop: 175 }}
+        contentContainerStyle={{ paddingBottom: SPACING[10], paddingTop: headerHeight }}
         onScroll={onScroll}
         scrollEventThrottle={16}
       >
 
         {/* ══════════════════ HERO ══════════════════ */}
-        <View style={s.hero}>
-          {/* Status */}
-          <View style={s.heroStatus}>
-            <View style={s.statusDot} />
-            <Text style={s.statusText}>Aberto agora · fecha às 22h</Text>
-          </View>
+        <ImageBackground
+          source={{ uri: 'https://eucwoxjmjfqylyrqunwk.supabase.co/storage/v1/object/public/logo/banner.png' }}
+          style={s.heroBg}
+          imageStyle={{ resizeMode: 'cover' }}
+        >
+          {/* Overlay escuro */}
+          <View style={s.heroOverlay} />
 
-          {/* Linha principal: título + cards de stats */}
-          <View style={s.heroMain}>
-            {/* Esquerda — copy */}
-            <View style={s.heroLeft}>
-              <Text style={s.heroTitle}>A batata{"\n"}que você{"\n"}merecia.</Text>
-              <Text style={s.heroSub}>Recheios generosos{"\n"}até 22 min na sua porta</Text>
+          <View style={s.hero}>
+            {/* Status */}
+            <View style={s.heroStatus}>
+              <View style={s.statusDot} />
+              <Text style={[s.statusText, { color: '#86EFAC' }]}>Aberto agora · fecha às 22h</Text>
             </View>
 
-            {/* Direita — stats verticais */}
-            <View style={s.heroRight}>
-              <View style={s.heroStatCard}>
-                <Text style={s.heroStatNum}>35+</Text>
-                <Text style={s.heroStatLabel}>pedidos{"\n"}hoje</Text>
+            {/* Linha principal: título + cards de stats */}
+            <View style={s.heroMain}>
+              <View style={s.heroLeft}>
+                <Text style={[s.heroTitle, { color: '#FFFFFF' }]}>A batata{"\n"}que você{"\n"}merecia.</Text>
+                <Text style={[s.heroSub, { color: 'rgba(255,255,255,0.75)' }]}>Recheios generosos{"\n"}até 22 min na sua porta</Text>
               </View>
-              <View style={[s.heroStatCard, s.heroStatCardAlt]}>
-                <Ionicons name="star" size={14} color={COLORS.primary} />
-                <Text style={s.heroStatNum}>4.9</Text>
-                <Text style={s.heroStatLabel}>avaliação</Text>
+              <View style={s.heroRight}>
+                <View style={[s.heroStatCard, { backgroundColor: 'rgba(0,0,0,0.45)', borderColor: 'rgba(255,255,255,0.15)' }]}>
+                  <Text style={[s.heroStatNum, { color: '#FFF' }]}>35+</Text>
+                  <Text style={[s.heroStatLabel, { color: 'rgba(255,255,255,0.6)' }]}>pedidos{"\n"}hoje</Text>
+                </View>
+                <View style={[s.heroStatCard, { backgroundColor: COLORS.primary + 'CC', borderColor: COLORS.primary }]}>
+                  <Ionicons name="star" size={14} color="#1A1A1A" />
+                  <Text style={[s.heroStatNum, { color: '#1A1A1A' }]}>4.9</Text>
+                  <Text style={[s.heroStatLabel, { color: 'rgba(0,0,0,0.6)' }]}>avaliação</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Chips de info */}
+            <View style={s.heroChips}>
+              <View style={[s.chip, { backgroundColor: 'rgba(0,0,0,0.4)', borderColor: 'rgba(255,255,255,0.2)' }]}>
+                <Ionicons name="bicycle-outline" size={13} color={COLORS.primary} />
+                <Text style={[s.chipText, { color: '#FFF' }]}>Frete grátis</Text>
+              </View>
+              <View style={[s.chip, { backgroundColor: 'rgba(0,0,0,0.4)', borderColor: 'rgba(255,255,255,0.2)' }]}>
+                <Ionicons name="time-outline" size={13} color={COLORS.primary} />
+                <Text style={[s.chipText, { color: '#FFF' }]}>15–22 min</Text>
               </View>
             </View>
           </View>
+        </ImageBackground>
 
-          {/* Chips de info */}
-          <View style={s.heroChips}>
-            <View style={s.chip}>
-              <Ionicons name="bicycle-outline" size={13} color={COLORS.primary} />
-              <Text style={s.chipText}>Frete grátis</Text>
-            </View>
-            <View style={s.chip}>
-              <Ionicons name="time-outline" size={13} color={COLORS.primary} />
-              <Text style={s.chipText}>15–22 min</Text>
-            </View>
-          </View>
-
-          {/* CTA */}
+        {/* CTA fora da imagem */}
+        <View style={s.heroCtaWrap}>
           <Pressable style={s.heroCta} onPress={() => router.push('/cardapio')}>
             <Text style={s.heroCtaText}>Ver Cardápio</Text>
-            <Ionicons name="arrow-forward" size={16} color={COLORS.background} />
+            <Ionicons name="arrow-forward" size={16} color="#1A1A1A" />
           </Pressable>
         </View>
 
@@ -269,7 +272,12 @@ export default function Home() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={s.catRow}
           >
-            {CATEGORIAS.map((cat) => (
+            {[
+              { label: 'Batatas',   icon: 'flame-outline' },
+              { label: 'Macarrão', icon: 'restaurant-outline' },
+              { label: 'Bebidas',  icon: 'wine-outline' },
+              { label: 'Promoções',icon: 'pricetag-outline' },
+            ].map((cat) => (
               <Pressable
                 key={cat.label}
                 style={s.catPill}
@@ -326,7 +334,28 @@ export default function Home() {
           </ScrollView>
         </View>
 
-        {/* ══════════════════ MAIS PEDIDOS ══════════════════ */}
+        {/* ══════════════════ COMO FUNCIONA ══════════════════ */}
+        <View style={s.section}>
+          <View style={s.sectionRow}>
+            <Text style={s.sectionTitle}>Como funciona</Text>
+          </View>
+          <View style={s.howRow}>
+            {[
+              { icon: 'search-outline',      titulo: 'Escolha',  sub: 'Navegue pelo cardápio'  },
+              { icon: 'card-outline',         titulo: 'Pague',    sub: 'Rápido e seguro'        },
+              { icon: 'bicycle-outline',      titulo: 'Receba',   sub: 'Em até 22 minutos'      },
+            ].map((step, i) => (
+              <View key={step.titulo} style={s.howStep}>
+                <View style={s.howIconWrap}>
+                  <Ionicons name={step.icon} size={22} color={COLORS.primary} />
+                  {i < 2 && <View style={s.howLine} />}
+                </View>
+                <Text style={s.howTitulo}>{step.titulo}</Text>
+                <Text style={s.howSub}>{step.sub}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
         <View style={s.section}>
           <View style={s.sectionRow}>
             <Text style={s.sectionTitle}>Mais pedidos</Text>
@@ -357,15 +386,28 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   scroll: { flex: 1 },
 
-  // ── HERO ──────────────────────────────────────────────────────────────────
+  // ── HERO COM FUNDO ────────────────────────────────────────────────────────
+  heroBg: {
+    width: '100%',
+    height: 300,
+  },
+  heroOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.50)',
+  },
   hero: {
     paddingHorizontal: SPACING[6],
     paddingTop: SPACING[6],
-    paddingBottom: SPACING[7],
-    backgroundColor: COLORS.backgroundElevated,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    paddingBottom: SPACING[6],
     gap: SPACING[3],
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  heroCtaWrap: {
+    paddingHorizontal: SPACING[6],
+    paddingTop: SPACING[4],
+    paddingBottom: SPACING[2],
+    backgroundColor: COLORS.background,
   },
   heroStatus: {
     flexDirection: 'row',
@@ -524,7 +566,7 @@ const s = StyleSheet.create({
     gap: 5,
     paddingHorizontal: SPACING[4],
     paddingVertical: 8,
-    borderRadius: RADIUS.full ?? 999,
+    borderRadius: 999,
     borderWidth: 1,
     borderColor: COLORS.border,
     backgroundColor: COLORS.backgroundCard,
@@ -533,7 +575,6 @@ const s = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: COLORS.textSecondary,
-    letterSpacing: 0,
   },
 
   // ── MINI CAROUSEL (Em alta) ───────────────────────────────────────────────
@@ -775,5 +816,54 @@ const s = StyleSheet.create({
   loader: {
     alignItems: 'center',
     paddingVertical: SPACING[10],
+  },
+
+  // ── COMO FUNCIONA ─────────────────────────────────────────────────────────
+  howRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING[6],
+    backgroundColor: COLORS.backgroundCard,
+    marginHorizontal: SPACING[6],
+    borderRadius: RADIUS.xl,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingVertical: SPACING[5],
+    ...SHADOWS.sm,
+  },
+  howStep: {
+    flex: 1,
+    alignItems: 'center',
+    gap: SPACING[1],
+  },
+  howIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: COLORS.primary + '15',
+    borderWidth: 1.5,
+    borderColor: COLORS.primary + '40',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACING[2],
+  },
+  howLine: {
+    position: 'absolute',
+    right: -32,
+    top: '50%',
+    width: 28,
+    height: 1.5,
+    backgroundColor: COLORS.border,
+  },
+  howTitulo: {
+    color: COLORS.text,
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  howSub: {
+    color: COLORS.textMuted,
+    fontSize: 10,
+    textAlign: 'center',
+    lineHeight: 14,
   },
 });

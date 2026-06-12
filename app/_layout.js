@@ -4,7 +4,16 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useRef, useEffect } from 'react';
 
-/* ============ CONTEXT DO CARRINHO ============ */
+/* ============ CONTEXTO DE DIREÇÃO DE NAVEGAÇÃO ============ */
+// Controla a animação do Stack e lembra a última rota antes de /addresses
+const NavContext = createContext({
+  animation: 'slide_from_right',
+  setAnimation: () => {},
+  lastRoute: '/',
+  setLastRoute: () => {},
+});
+
+export const useNavContext = () => useContext(NavContext);
 import { createContext, useContext } from 'react';
 
 const CartContext = createContext({
@@ -277,30 +286,40 @@ export const useScrollHandler = () => {
   };
 };
 
+/* ============ HEADER HEIGHT CONTEXT ============ */
+// Compartilha a altura real do header (medida via onLayout) com as telas
+// Cada tela usa: const headerHeight = useHeaderHeight()
+// e passa pro ScrollView: contentContainerStyle={{ paddingTop: headerHeight }}
+const HeaderHeightContext = createContext(175); // fallback seguro
+
+export const useHeaderHeight = () => useContext(HeaderHeightContext);
+
 import { supabase } from '../supabaseConfig';
 
 /* ============ HEADER GLOBAL COM HIDE/SHOW SCROLL ============ */
-function Header() {
+function Header({ onHeightChange }) {
   const [selectedAddress, setSelectedAddress] = useState('Selecione um endereço');
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [user, setUser] = useState(null);
+  const [authResolved, setAuthResolved] = useState(false);
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const headerTranslateY = useRef(new Animated.Value(0)).current;
-  const authRowOpacity = useRef(new Animated.Value(1)).current;
-  const authRowHeight = useRef(new Animated.Value(1)).current; // 1=visível 0=escondido
+  const authRowOpacity   = useRef(new Animated.Value(1)).current;
+  const authRowTranslateY = useRef(new Animated.Value(0)).current;
+  const [authRowVisible, setAuthRowVisible] = useState(true);
+  const addressNavLock = useRef(false); // bloqueio duplo clique
   const router = useRouter();
   const { totalItems } = useCart();
+  const { setAnimation, setLastRoute } = useNavContext();
 
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       const u = session?.user ?? null;
       setUser(u);
+      setAuthResolved(true);
       if (u) {
         fetchDefaultAddress(u.id);
-        // Já começa escondido se logado
-        authRowOpacity.setValue(0);
-        authRowHeight.setValue(0);
       }
     });
 
@@ -309,18 +328,20 @@ function Header() {
       setUser(u);
       if (u) {
         fetchDefaultAddress(u.id);
-        // Esconde authRow com animação ao logar
+        // Esconde authRow com slide up + fade ao logar
         Animated.parallel([
-          Animated.timing(authRowOpacity, { toValue: 0, duration: 250, useNativeDriver: false }),
-          Animated.timing(authRowHeight,  { toValue: 0, duration: 250, useNativeDriver: false }),
-        ]).start();
+          Animated.timing(authRowOpacity,    { toValue: 0, duration: 220, useNativeDriver: true }),
+          Animated.timing(authRowTranslateY, { toValue: -12, duration: 220, useNativeDriver: true }),
+        ]).start(() => setAuthRowVisible(false));
       } else {
         setSelectedAddress('Selecione um endereço');
-        // Mostra authRow com animação ao deslogar (se não estiver em /addresses)
         if (!isAddressPage) {
+          // Mostra authRow com slide down + fade ao deslogar
+          authRowTranslateY.setValue(-12);
+          setAuthRowVisible(true);
           Animated.parallel([
-            Animated.timing(authRowOpacity, { toValue: 1, duration: 300, useNativeDriver: false }),
-            Animated.timing(authRowHeight,  { toValue: 1, duration: 300, useNativeDriver: false }),
+            Animated.timing(authRowOpacity,    { toValue: 1, duration: 280, useNativeDriver: true }),
+            Animated.timing(authRowTranslateY, { toValue: 0, duration: 280, useNativeDriver: true }),
           ]).start();
         }
       }
@@ -408,26 +429,34 @@ function Header() {
 
   // Anima o authRow pra sumir/aparecer quando entra/sai de /addresses
   useEffect(() => {
+    // Aguarda o getSession resolver antes de tomar qualquer decisão
+    if (!authResolved) return;
+
     if (isAddressPage || user) {
-      // Esconde: dentro de /addresses OU usuário logado
+      // Esconde: slide up + fade
       Animated.parallel([
-        Animated.timing(authRowOpacity, { toValue: 0, duration: 250, useNativeDriver: false }),
-        Animated.timing(authRowHeight,  { toValue: 0, duration: 250, useNativeDriver: false }),
-      ]).start();
+        Animated.timing(authRowOpacity,    { toValue: 0, duration: 200, useNativeDriver: true }),
+        Animated.timing(authRowTranslateY, { toValue: -12, duration: 200, useNativeDriver: true }),
+      ]).start(() => setAuthRowVisible(false));
     } else {
-      // Mostra: fora de /addresses E não logado
+      // Mostra: slide down + fade
+      authRowTranslateY.setValue(-12);
+      setAuthRowVisible(true);
       Animated.parallel([
-        Animated.timing(authRowOpacity, { toValue: 1, duration: 300, useNativeDriver: false }),
-        Animated.timing(authRowHeight,  { toValue: 1, duration: 300, useNativeDriver: false }),
+        Animated.timing(authRowOpacity,    { toValue: 1, duration: 250, useNativeDriver: true }),
+        Animated.timing(authRowTranslateY, { toValue: 0, duration: 250, useNativeDriver: true }),
       ]).start();
     }
-  }, [isAddressPage, user]);
+  }, [isAddressPage, user, authResolved]);
 
   if (isAuthPage || isProdutoPage) return null;
 
   return (
     <>
-      <Animated.View style={[s.headerSafeAnimated, { transform: [{ translateY: headerTranslateY }], position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1000 }]}>
+      <Animated.View
+        style={[s.headerSafeAnimated, { transform: [{ translateY: headerTranslateY }], position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1000 }]}
+        onLayout={(e) => onHeightChange && onHeightChange(e.nativeEvent.layout.height)}
+      >
         <SafeAreaView style={s.headerSafe} edges={['top']}>
           {/* ── Linha 1: endereço ── */}
           <View style={s.addressRow}>
@@ -440,7 +469,15 @@ function Header() {
             <Animated.View style={[s.addressSelectorInline, { transform: [{ scale: scaleAnim }] }]}>
               <Pressable
                 style={s.addressSelectorInnerRow}
-                onPress={() => router.push('/addresses')}
+                onPress={() => {
+                  if (addressNavLock.current || isAddressPage) return;
+                  addressNavLock.current = true;
+                  setLastRoute(pathname);
+                  setAnimation('slide_from_right');
+                  router.replace('/addresses');
+                  // libera após a animação terminar
+                  setTimeout(() => { addressNavLock.current = false; }, 600);
+                }}
                 onPressIn={handlePressIn}
                 onPressOut={handlePressOut}
               >
@@ -468,24 +505,25 @@ function Header() {
           </View>
 
           {/* ── Linha 2: botões de auth — some animado em /addresses ou logado ── */}
-          <Animated.View style={[
-            s.authRow,
-            {
+          {authRowVisible && (
+            <Animated.View style={[s.authRow, {
               opacity: authRowOpacity,
-              maxHeight: authRowHeight.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0, 56],
-              }),
-              overflow: 'hidden',
-            }
-          ]}>
-            <Pressable style={s.registerHeaderBtn} onPress={() => router.push('/auth/register')}>
-              <Text style={s.registerHeaderBtnText}>Criar conta</Text>
-            </Pressable>
-            <Pressable style={s.loginBtn} onPress={() => router.push('/auth/login')}>
-              <Text style={s.loginBtnText}>Entrar</Text>
-            </Pressable>
-          </Animated.View>
+              transform: [{ translateY: authRowTranslateY }],
+            }]}>
+              <Pressable style={s.registerHeaderBtn} onPress={() => {
+                setAnimation('slide_from_right');
+                router.push('/auth/register');
+              }}>
+                <Text style={s.registerHeaderBtnText}>Criar conta</Text>
+              </Pressable>
+              <Pressable style={s.loginBtn} onPress={() => {
+                setAnimation('slide_from_right');
+                router.push('/auth/login');
+              }}>
+                <Text style={s.loginBtnText}>Entrar</Text>
+              </Pressable>
+            </Animated.View>
+          )}
         </SafeAreaView>
       </Animated.View>
 
@@ -500,23 +538,43 @@ function Header() {
 }
 
 /* ============ BOTTOM TAB BAR ============ */
+// Ordem das tabs para calcular direção da animação
+const TAB_ORDER = ['index', 'cardapio', 'pedidos', 'profile'];
+
+function getTabIndex(pathname) {
+  if (pathname === '/' || pathname === '/index') return 0;
+  return TAB_ORDER.findIndex((t) => t !== 'index' && pathname.includes(t));
+}
+
 function BottomTabBar() {
   const router = useRouter();
   const pathname = usePathname();
+  const { setAnimation } = useNavContext();
 
-  // Não exibe tab bar na tela de detalhe do produto
   if (pathname.includes('produto')) return null;
 
   const tabs = [
-    { name: 'index', label: 'Início', icon: 'home', iconOutline: 'home-outline' },
+    { name: 'index',    label: 'Início',   icon: 'home',       iconOutline: 'home-outline' },
     { name: 'cardapio', label: 'Cardápio', icon: 'restaurant', iconOutline: 'restaurant-outline' },
-    { name: 'pedidos', label: 'Pedidos', icon: 'receipt', iconOutline: 'receipt-outline' },
-    { name: 'profile', label: 'Perfil', icon: 'person', iconOutline: 'person-outline' },
+    { name: 'pedidos',  label: 'Pedidos',  icon: 'receipt',    iconOutline: 'receipt-outline' },
+    { name: 'profile',  label: 'Perfil',   icon: 'person',     iconOutline: 'person-outline' },
   ];
 
   const isActive = (routeName) => {
     if (routeName === 'index') return pathname === '/' || pathname === '/index';
     return pathname.includes(routeName);
+  };
+
+  const currentIdx = getTabIndex(pathname);
+
+  const handleTabPress = (tab) => {
+    const targetIdx = TAB_ORDER.indexOf(tab.name);
+    // Mesma tab = não faz nada
+    if (targetIdx === currentIdx) return;
+    const direction = targetIdx > currentIdx ? 'slide_from_right' : 'slide_from_left';
+    setAnimation(direction);
+    const route = tab.name === 'index' ? '/' : `/${tab.name}`;
+    router.push(route);
   };
 
   return (
@@ -527,7 +585,7 @@ function BottomTabBar() {
           <Pressable
             key={tab.name}
             style={s.tabItem}
-            onPress={() => router.push(tab.name === 'index' ? '/' : `/${tab.name}`)}
+            onPress={() => handleTabPress(tab)}
           >
             <Ionicons
               name={active ? tab.icon : tab.iconOutline}
@@ -549,26 +607,34 @@ function BottomTabBar() {
 const rootScrollY = new Animated.Value(0);
 
 export default function RootLayout() {
+  const [headerHeight, setHeaderHeight] = useState(175);
+  const [animation, setAnimation] = useState('slide_from_right');
+  const [lastRoute, setLastRoute] = useState('/');
+
   return (
     <CartProvider>
+      <NavContext.Provider value={{ animation, setAnimation, lastRoute, setLastRoute }}>
       <ScrollYContext.Provider value={rootScrollY}>
+      <HeaderHeightContext.Provider value={headerHeight}>
       <SafeAreaProvider>
         <StatusBar backgroundColor="#FFB800" barStyle="dark-content" />
         <View style={{ flex: 1 }}>
-          <Header />
+          <Header onHeightChange={setHeaderHeight} />
           <View style={{ flex: 1 }}>
             <Stack
               screenOptions={{
                 headerShown: false,
                 contentStyle: { backgroundColor: '#F8F9FA' },
-                animationEnabled: true,
+                animation,
               }}
             />
           </View>
           <BottomTabBar />
         </View>
       </SafeAreaProvider>
+      </HeaderHeightContext.Provider>
       </ScrollYContext.Provider>
+      </NavContext.Provider>
     </CartProvider>
   );
 }

@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../supabaseConfig';
@@ -78,6 +79,11 @@ export default function RegisterScreen() {
           </TouchableOpacity>
 
           <View style={styles.header}>
+            <Image
+              source={{ uri: 'https://eucwoxjmjfqylyrqunwk.supabase.co/storage/v1/object/public/logo/logo.png' }}
+              style={styles.logo}
+              resizeMode="contain"
+            />
             <Text style={styles.title}>Criar Conta</Text>
             <Text style={styles.subtitle}>Cadastre-se para começar a acumular pontos e receber ofertas exclusivas.</Text>
           </View>
@@ -186,7 +192,13 @@ const styles = StyleSheet.create({
     marginBottom: 30,
   },
   header: {
-    marginBottom: 40,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  logo: {
+    width: 260,
+    height: 310,
+    marginBottom: -90,
   },
   title: {
     fontSize: 28,
@@ -198,6 +210,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     lineHeight: 22,
+    textAlign: 'center',
+    paddingHorizontal: 10,
   },
   form: {
     width: '100%',

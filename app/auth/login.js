@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../supabaseConfig';
@@ -59,10 +60,11 @@ export default function LoginScreen() {
           </TouchableOpacity>
 
           <View style={styles.header}>
-            <View style={styles.logoContainer}>
-              <Text style={styles.logoEmoji}>🍟</Text>
-            </View>
-            <Text style={styles.title}>Batata Top</Text>
+            <Image
+              source={{ uri: 'https://eucwoxjmjfqylyrqunwk.supabase.co/storage/v1/object/public/logo/logo.png' }}
+              style={styles.logo}
+              resizeMode="contain"
+            />
             <Text style={styles.subtitle}>O sabor que você já conhece, agora no seu celular.</Text>
           </View>
 
@@ -154,27 +156,13 @@ const styles = StyleSheet.create({
     marginBottom: 30,
   },
   header: {
-    alignItems: 'center',
-    marginBottom: 40,
+  alignItems: 'center',
+  marginBottom: 16,
   },
-  logoContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 20,
-    backgroundColor: '#FFB500',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-    ...SHADOWS.md,
-  },
-  logoEmoji: {
-    fontSize: 40,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '900',
-    color: '#1A1A1A',
-    marginBottom: 8,
+  logo: {
+    width: 260,
+    height: 310,
+    marginBottom: -70,
   },
   subtitle: {
     fontSize: 14,

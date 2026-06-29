@@ -15,23 +15,27 @@ export const cartStore = {
     listeners.forEach((l) => l([...cart]));
   },
   addToCart(product) {
-    const existing = cart.find((item) => item.id === product.id);
+    const qty = product.quantidade || product.quantity || 1;
+    const adIds = (product.adicionais || []).map(a => a.id).sort().join('-');
+    const cartItemId = `${product.id}-${adIds}-${product.observacoes || ''}`;
+
+    const existing = cart.find((item) => (item.cartItemId || item.id) === cartItemId);
     if (existing) {
-      existing.quantity += 1;
+      existing.quantity += qty;
     } else {
-      cart.push({ ...product, quantity: 1 });
+      cart.push({ ...product, cartItemId, quantity: qty });
     }
     this.emit();
   },
-  removeFromCart(productId) {
-    cart = cart.filter((item) => item.id !== productId);
+  removeFromCart(cartItemId) {
+    cart = cart.filter((item) => (item.cartItemId || item.id) !== cartItemId);
     this.emit();
   },
-  updateQuantity(productId, quantity) {
+  updateQuantity(cartItemId, quantity) {
     if (quantity <= 0) {
-      this.removeFromCart(productId);
+      this.removeFromCart(cartItemId);
     } else {
-      const item = cart.find((item) => item.id === productId);
+      const item = cart.find((item) => (item.cartItemId || item.id) === cartItemId);
       if (item) {
         item.quantity = quantity;
       }

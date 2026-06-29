@@ -1,70 +1,33 @@
-import { View, Text, ScrollView, StyleSheet, Pressable, Image, Switch, Alert, ActivityIndicator } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useState, useEffect } from 'react';
+import { View, Text, ScrollView, StyleSheet, Pressable, Image, Alert, ActivityIndicator, Linking } from 'react-native';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { useState, useEffect, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../supabaseConfig';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme';
-
-function ProfileHeader({ user }) {
-  return (
-    <View style={s.headerContainer}>
-      <View style={s.profileTop}>
-        <View style={s.profileImageWrapper}>
-          <Image
-            source={{ uri: user?.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/png?seed=${user?.email || 'Guest'}` }}
-            style={s.profileImage}
-          />
-        </View>
-        <View style={s.userInfo}>
-          <Text style={s.userName}>{user?.user_metadata?.full_name || 'Usuário Batatop'}</Text>
-          <Text style={s.userEmail}>{user?.email || 'Conectado via Supabase'}</Text>
-        </View>
-      </View>
-
-    </View>
-  );
-}
-
-function MenuItem({ icon, label, value, onPress, isLast = false, color = COLORS.primary }) {
-  return (
-    <Pressable 
-      style={[s.menuItem, isLast && { borderBottomWidth: 0 }]} 
-      onPress={onPress}
-    >
-      <View style={s.menuItemLeft}>
-        <View style={[s.menuIconBg, { backgroundColor: color + '15' }]}>
-          <Ionicons name={icon} size={20} color={color} />
-        </View>
-        <View style={s.menuItemTextContainer}>
-          <Text style={s.menuItemLabel}>{label}</Text>
-          {value && <Text style={s.menuItemValue}>{value}</Text>}
-        </View>
-      </View>
-      <Ionicons name="chevron-forward" size={18} color={COLORS.textMuted} />
-    </Pressable>
-  );
-}
-
-function Section({ title, children }) {
-  return (
-    <View style={s.section}>
-      <Text style={s.sectionTitle}>{title}</Text>
-      <View style={s.sectionContent}>
-        {children}
-      </View>
-    </View>
-  );
-}
+import { useScrollHandler, useHeaderHeight } from './_layout';
+import { getPreferredPaymentMethod, setPreferredPaymentMethod, getPreferredCardId, setPreferredCardId } from '../utils/paymentPrefs';
+import { formatCardDisplay } from '../utils/usePaymentCards';
+import PaymentMethodModal from '../components/PaymentMethodModal';
 
 export default function Profile() {
   const router = useRouter();
+  const { onScroll, resetHeader } = useScrollHandler();
+  const headerHeight = useHeaderHeight();
+
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [defaultAddress, setDefaultAddress] = useState(null);
+  const [paymentMethod, setPaymentMethod] = useState('pix');
+  const [selectedCardId, setSelectedCardId] = useState(null);
+  const [selectedCardInfo, setSelectedCardInfo] = useState(null);
+  const [paymentModalVisible, setPaymentModalVisible] = useState(false);
 
-  useEffect(() => {
-    checkUser();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      resetHeader();
+      checkUser();
+    }, [resetHeader])
+  );
 
   async function checkUser() {
     try {
@@ -73,95 +36,463 @@ export default function Profile() {
       setUser(u);
 
       if (u) {
-        const { data } = await supabase
+        // Buscar endereço padrão
+        const { data: addr } = await supabase
           .from('addresses')
-          .select('street, number, city, state')
+          .select('id, street, number, neighborhood, city, is_default')
           .eq('user_id', u.id)
           .eq('is_default', true)
-          .single();
-        if (data) {
-          setDefaultAddress(`${data.street}, ${data.number} · ${data.city}/${data.state}`);
+          .maybeSingle();
+
+        if (addr) {
+          setDefaultAddress(addr);
         } else {
-          // nenhum padrão, pega o mais recente
-          const { data: any } = await supabase
+          // Se não houver padrão, buscar o mais recente
+          const { data: latest } = await supabase
             .from('addresses')
-            .select('street, number, city, state')
+            .select('id, street, number, neighborhood, city, is_default')
             .eq('user_id', u.id)
             .order('created_at', { ascending: false })
             .limit(1)
-            .single();
-          if (any) setDefaultAddress(`${any.street}, ${any.number} · ${any.city}/${any.state}`);
+            .maybeSingle();
+          setDefaultAddress(latest || null);
+        }
+
+        // Carregar forma de pagamento salva
+        const savedMethod = await getPreferredPaymentMethod();
+        if (savedMethod) {
+          setPaymentMethod(savedMethod);
+        }
+        const savedCardId = await getPreferredCardId();
+        if (savedCardId) {
+          setSelectedCardId(savedCardId);
+          const { data: cardData } = await supabase
+            .from('payment_cards')
+            .select('*')
+            .eq('id', savedCardId)
+            .maybeSingle();
+          setSelectedCardInfo(cardData || null);
         }
       }
     } catch (error) {
-      console.error('Erro ao verificar usuário:', error);
+      console.error('Erro ao carregar dados do perfil:', error);
     } finally {
       setLoading(false);
     }
   }
 
-  const handleLogout = async () => {
-    Alert.alert('Sair', 'Deseja realmente sair da sua conta?', [
+  const handleDeleteAddress = async (id) => {
+    Alert.alert('Excluir Endereço', 'Tem certeza que deseja remover este endereço?', [
       { text: 'Cancelar', style: 'cancel' },
-      { 
-        text: 'Sair', 
-        style: 'destructive', 
+      {
+        text: 'Excluir',
+        style: 'destructive',
+        onPress: async () => {
+          const { error } = await supabase.from('addresses').delete().eq('id', id);
+          if (!error) {
+            setDefaultAddress(null);
+            checkUser();
+          }
+        }
+      }
+    ]);
+  };
+
+  const handleSelectSimpleMethod = async (method) => {
+    try {
+      await setPreferredPaymentMethod(method);
+      await setPreferredCardId(null);
+      setPaymentMethod(method);
+      setSelectedCardId(null);
+      setSelectedCardInfo(null);
+      setPaymentModalVisible(false);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleSelectCard = async (card) => {
+    try {
+      await setPreferredPaymentMethod(card.card_type);
+      await setPreferredCardId(card.id);
+      setPaymentMethod(card.card_type);
+      setSelectedCardId(card.id);
+      setSelectedCardInfo(card);
+      setPaymentModalVisible(false);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleLogout = async () => {
+    Alert.alert('Sair da conta', 'Deseja realmente sair da sua conta?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Sair',
+        style: 'destructive',
         onPress: async () => {
           await supabase.auth.signOut();
           router.replace('/');
-        } 
+        }
       }
     ]);
+  };
+
+  const getPaymentLabel = (method) => {
+    if ((method === 'cartão de crédito' || method === 'cartão de débito') && selectedCardInfo) {
+      return formatCardDisplay(selectedCardInfo);
+    }
+    const map = {
+      pix: 'PIX',
+      dinheiro: 'Dinheiro',
+      'cartão de crédito': 'Cartão de Crédito',
+      'cartão de débito': 'Cartão de Débito'
+    };
+    return map[method] || method;
   };
 
   if (loading) {
     return (
       <View style={s.loadingContainer}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
+        <ActivityIndicator size="large" color="#FFB800" />
       </View>
     );
   }
 
+  const isAdmin = user?.email === 'enzzobaraldo2008@gmail.com' ||
+                  user?.email?.includes('admin') ||
+                  user?.user_metadata?.role === 'admin';
+
   if (!user) {
     return (
-      <View style={s.notLoggedIn}>
-        <Ionicons name="person-circle-outline" size={80} color={COLORS.border} />
-        <Text style={s.notLoggedInTitle}>Você não está logado</Text>
-        <Text style={s.notLoggedInText}>Faça login para salvar seus endereços e ver seus pedidos.</Text>
-        <Pressable style={s.loginBtn} onPress={() => router.push('/auth/login')}>
-          <Text style={s.loginBtnText}>Fazer Login</Text>
+      <View style={ag.wrap}>
+        <View style={ag.iconWrap}>
+          <View style={ag.iconCircle}>
+            <Ionicons name="person-outline" size={34} color="#FFB800" />
+          </View>
+          <View style={ag.lockBadge}>
+            <Ionicons name="lock-closed" size={11} color="#fff" />
+          </View>
+        </View>
+
+        <Text style={ag.title}>Meu Perfil</Text>
+        <Text style={ag.sub}>
+          Faça login para acessar seu perfil, endereços e histórico de pedidos.
+        </Text>
+
+        <View style={ag.warnBanner}>
+          <Ionicons name="information-circle" size={15} color="#FFB800" />
+          <Text style={ag.warnText}>
+            Não é possível acessar o perfil sem uma conta ativa.
+          </Text>
+        </View>
+
+        <Pressable style={ag.btnPrimary} onPress={() => router.push('/auth/login')}>
+          <View style={ag.btnInner}>
+            <Text style={ag.btnPrimaryText}>Entrar na conta</Text>
+            <Ionicons name="arrow-forward" size={15} color="#fff" />
+          </View>
         </Pressable>
+
+        <Pressable style={ag.btnSecondary} onPress={() => router.push('/auth/register')}>
+          <View style={ag.btnInner}>
+            <Ionicons name="person-add-outline" size={15} color="#FFB800" />
+            <Text style={ag.btnSecondaryText}>Criar conta</Text>
+          </View>
+        </Pressable>
+
+        <Text style={ag.footer}>Rápido, gratuito e seus dados ficam seguros.</Text>
       </View>
     );
   }
 
   return (
     <View style={s.container}>
-      <ScrollView style={s.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 120 }}>
-        <ProfileHeader user={user} />
+      <ScrollView
+        style={s.scroll}
+        showsVerticalScrollIndicator={false}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+        contentContainerStyle={{ paddingTop: headerHeight, paddingBottom: 60 }}
+      >
+        {/* Banner amarelo superior decorativo */}
+        <View style={s.yellowBanner} />
 
-        <Section title="Minha Conta">
-          <MenuItem icon="location-outline" label="Meus Endereços" value={defaultAddress || 'Gerenciar endereços de entrega'} onPress={() => router.push('/addresses')} />
-          <MenuItem icon="receipt-outline" label="Meus Pedidos" value="Histórico de compras" onPress={() => router.push('/pedidos')} />
-          <MenuItem icon="card-outline" label="Formas de Pagamento" isLast onPress={() => {}} />
-        </Section>
+        {/* Card do Perfil do Usuário */}
+        <View style={s.userCard}>
+          <View style={s.avatarWrapper}>
+            <Image
+              source={{ uri: user?.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/png?seed=${user?.email || 'Guest'}` }}
+              style={s.avatarImage}
+            />
+          </View>
+          <Text style={s.userName}>{user?.user_metadata?.full_name || 'Usuário Batatop'}</Text>
+          <View style={s.emailRow}>
+            <Ionicons name="mail-outline" size={14} color="#999" />
+            <Text style={s.userEmail}>{user?.email}</Text>
+          </View>
+        </View>
 
-        <Section title="Suporte">
-          <MenuItem icon="help-circle-outline" label="Ajuda e Suporte" onPress={() => {}} />
-          <MenuItem icon="document-text-outline" label="Termos de Uso" isLast onPress={() => {}} />
-        </Section>
+        {/* Seção Dados e Segurança */}
+        <View style={s.sectionCard}>
+          {/* Meus Dados */}
+          <Pressable style={s.menuItem} onPress={() => router.push('/profile-data')}>
+            <View style={[s.menuIconBg, { backgroundColor: '#F3E8FF' }]}>
+              <Ionicons name="settings-outline" size={20} color="#A855F7" />
+            </View>
+            <View style={s.menuItemTextCol}>
+              <Text style={s.menuItemLabel}>Meus Dados</Text>
+              <Text style={s.menuItemSub}>Nome, telefone e mais</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#CCCCCC" />
+          </Pressable>
 
-        {/* Botão sair — no fundo da tela */}
-        <Pressable style={s.logoutBtn} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={18} color={COLORS.error} />
-          <Text style={s.logoutBtnText}>Sair da Conta</Text>
-        </Pressable>
+          <View style={s.menuDivider} />
 
-        <Text style={s.versionText}>Batata Top v2.1.0</Text>
+          {/* Segurança */}
+          <Pressable style={s.menuItem} onPress={() => router.push('/profile-security')}>
+            <View style={[s.menuIconBg, { backgroundColor: '#E2E8F0' }]}>
+              <Ionicons name="lock-closed-outline" size={20} color="#64748B" />
+            </View>
+            <View style={s.menuItemTextCol}>
+              <Text style={s.menuItemLabel}>Segurança</Text>
+              <Text style={s.menuItemSub}>Senha e privacidade</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#CCCCCC" />
+          </Pressable>
+        </View>
+
+        {/* Seção Endereços */}
+        <View style={s.sectionCard}>
+          <View style={s.sectionHeaderRow}>
+            <View style={s.sectionHeaderLeft}>
+              <View style={[s.menuIconBg, { backgroundColor: '#FEF3C7' }]}>
+                <Ionicons name="location-outline" size={20} color="#D97706" />
+              </View>
+              <View style={s.menuItemTextCol}>
+                <Text style={s.menuItemLabel}>Meus Endereços</Text>
+                <Text style={s.menuItemSub}>Onde entregamos suas batatas</Text>
+              </View>
+            </View>
+            <Pressable onPress={() => router.push('/addresses')} style={s.addBtn}>
+              <Text style={s.addBtnText}>+ Adicionar</Text>
+            </Pressable>
+          </View>
+
+          {defaultAddress ? (
+            <View style={s.addressCard}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.addressStreet}>
+                  {defaultAddress.street}, {defaultAddress.number}
+                </Text>
+                <Text style={s.addressSub}>
+                  {defaultAddress.neighborhood} - {defaultAddress.city}
+                </Text>
+                <Text style={s.patternLabel}>PADRÃO</Text>
+              </View>
+              <Pressable onPress={() => handleDeleteAddress(defaultAddress.id)} style={s.trashBtn}>
+                <Ionicons name="trash-outline" size={18} color="#CCCCCC" />
+              </Pressable>
+            </View>
+          ) : (
+            <Text style={s.noAddressText}>Nenhum endereço cadastrado</Text>
+          )}
+        </View>
+
+        {/* Seção Pedidos, Ajuda e Pagamento */}
+        <View style={s.sectionCard}>
+          {/* Formas de Pagamento */}
+          <Pressable style={s.menuItem} onPress={() => setPaymentModalVisible(true)}>
+            <View style={[s.menuIconBg, { backgroundColor: '#FFE4E6' }]}>
+              <Ionicons name="card-outline" size={20} color="#F43F5E" />
+            </View>
+            <View style={s.menuItemTextCol}>
+              <Text style={s.menuItemLabel}>Forma de Pagamento Preferida</Text>
+              <Text style={s.menuItemSub}>Principal: {getPaymentLabel(paymentMethod)}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#CCCCCC" />
+          </Pressable>
+
+          <View style={s.menuDivider} />
+
+          {/* Meus Pedidos */}
+          <Pressable style={s.menuItem} onPress={() => router.push('/pedidos')}>
+            <View style={[s.menuIconBg, { backgroundColor: '#EFF6FF' }]}>
+              <Ionicons name="cube-outline" size={20} color="#3B82F6" />
+            </View>
+            <View style={s.menuItemTextCol}>
+              <Text style={s.menuItemLabel}>Meus Pedidos</Text>
+              <Text style={s.menuItemSub}>Histórico de compras</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#CCCCCC" />
+          </Pressable>
+
+          <View style={s.menuDivider} />
+
+          {/* Ajuda */}
+          <Pressable style={s.menuItem} onPress={() => {
+            const msg = encodeURIComponent('Oi! 👋 Tô precisando de uma ajuda com meu pedido na Batata Top, pode me ajudar?');
+            Linking.openURL(`https://wa.me/5514997361015?text=${msg}`);
+          }}>
+            <View style={[s.menuIconBg, { backgroundColor: '#DCFCE7' }]}>
+              <Ionicons name="help-circle-outline" size={20} color="#16A34A" />
+            </View>
+            <View style={s.menuItemTextCol}>
+              <Text style={s.menuItemLabel}>Ajuda</Text>
+              <Text style={s.menuItemSub}>Dúvidas e suporte</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#CCCCCC" />
+          </Pressable>
+        </View>
+
+        {/* Painel Administrativo (Exclusivo para admins) */}
+        {isAdmin && (
+          <View style={s.sectionCard}>
+            <Pressable style={s.menuItem} onPress={() => router.push('/admin')}>
+              <View style={[s.menuIconBg, { backgroundColor: '#FEF3C7' }]}>
+                <Ionicons name="shield-half-outline" size={20} color="#D97706" />
+              </View>
+              <View style={s.menuItemTextCol}>
+                <Text style={s.menuItemLabel}>Painel Administrativo</Text>
+                <Text style={s.menuItemSub}>Gerencie seus pedidos e operações</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color="#CCCCCC" />
+            </Pressable>
+          </View>
+        )}
+
+        {/* Botão Sair */}
+        <View style={s.sectionCard}>
+          <Pressable style={s.menuItem} onPress={handleLogout}>
+            <View style={[s.menuIconBg, { backgroundColor: '#FEE2E2' }]}>
+              <Ionicons name="log-out-outline" size={20} color="#EF4444" />
+            </View>
+            <View style={s.menuItemTextCol}>
+              <Text style={[s.menuItemLabel, { color: '#EF4444' }]}>Sair da conta</Text>
+            </View>
+          </Pressable>
+        </View>
+
+        <Text style={s.versionText}>Batata Top v2.2.0</Text>
       </ScrollView>
+
+      {/* Modal para seleção de Forma de Pagamento */}
+      <PaymentMethodModal
+        visible={paymentModalVisible}
+        onClose={() => setPaymentModalVisible(false)}
+        paymentMethod={paymentMethod}
+        selectedCardId={selectedCardId}
+        onSelectSimpleMethod={handleSelectSimpleMethod}
+        onSelectCard={handleSelectCard}
+      />
     </View>
   );
 }
+
+// Estilos de deslogado (Gating)
+const ag = StyleSheet.create({
+  wrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 30,
+    backgroundColor: '#F8F9FA',
+  },
+  iconWrap: {
+    position: 'relative',
+    marginBottom: 20,
+  },
+  iconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#FFF8E7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lockBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    backgroundColor: '#FFB800',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#F8F9FA',
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#1A1A1A',
+    marginBottom: 8,
+  },
+  sub: {
+    fontSize: 13,
+    color: '#666666',
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 20,
+  },
+  warnBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FFF8E7',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#FFE0B2',
+    marginBottom: 24,
+  },
+  warnText: {
+    fontSize: 11,
+    color: '#E65100',
+    fontWeight: '600',
+  },
+  btnPrimary: {
+    backgroundColor: '#FFB800',
+    height: 48,
+    borderRadius: 24,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  btnSecondary: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#FFB800',
+    height: 48,
+    borderRadius: 24,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  btnInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  btnPrimaryText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 14,
+  },
+  btnSecondaryText: {
+    color: '#FFB800',
+    fontWeight: '800',
+    fontSize: 14,
+  },
+  footer: {
+    fontSize: 11,
+    color: '#999999',
+  },
+});
 
 const s = StyleSheet.create({
   container: {
@@ -172,151 +503,181 @@ const s = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#F8F9FA',
   },
   scroll: {
     flex: 1,
   },
-  headerContainer: {
-    backgroundColor: COLORS.white,
-    padding: SPACING[6],
-    marginHorizontal: SPACING[5],
-    marginBottom: SPACING[6],
-    borderRadius: RADIUS.xl,
-    alignItems: 'center',
-    gap: SPACING[4],
-    ...SHADOWS.sm,
-  },
-  profileTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING[5],
+  yellowBanner: {
+    height: 100,
+    backgroundColor: '#FFB800',
     width: '100%',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
   },
-  profileImageWrapper: {
-    position: 'relative',
+  userCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    marginTop: 40,
+    marginHorizontal: 16,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+    marginBottom: 16,
   },
-  profileImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: COLORS.borderLight,
+  avatarWrapper: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 3,
+    borderColor: '#FFFFFF',
+    overflow: 'hidden',
+    backgroundColor: '#F3E8FF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 5,
+    elevation: 4,
+    marginBottom: 12,
   },
-  userInfo: {
-    flex: 1,
-    gap: 2,
+  avatarImage: {
+    width: '100%',
+    height: '100%',
   },
   userName: {
     fontSize: 18,
     fontWeight: '800',
-    color: COLORS.text,
+    color: '#1A1A1A',
+    marginBottom: 4,
+  },
+  emailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   userEmail: {
     fontSize: 13,
-    color: COLORS.textSecondary,
+    color: '#666666',
+    fontWeight: '500',
   },
-  logoutBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING[2],
-    marginHorizontal: SPACING[5],
-    marginBottom: SPACING[4],
-    paddingVertical: SPACING[4],
-    borderRadius: RADIUS.xl,
-    borderWidth: 1.5,
-    borderColor: COLORS.error + '50',
-    backgroundColor: COLORS.error + '08',
-  },
-  logoutBtnText: {
-    color: COLORS.error,
-    fontWeight: '700',
-    fontSize: TYPOGRAPHY.sizes.sm,
-  },
-  section: {
-    paddingHorizontal: SPACING[5],
-    marginBottom: SPACING[6],
-  },
-  sectionTitle: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: COLORS.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: SPACING[3],
-    marginLeft: 4,
-  },
-  sectionContent: {
-    backgroundColor: COLORS.white,
-    borderRadius: RADIUS.xl,
-    overflow: 'hidden',
-    ...SHADOWS.sm,
+
+  sectionCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 16,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: SPACING[4],
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.borderLight,
+    paddingVertical: 12,
   },
-  menuItemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING[4],
+  menuDivider: {
+    height: 1,
+    backgroundColor: '#F3F4F6',
+    marginVertical: 4,
   },
   menuIconBg: {
-    width: 36,
-    height: 36,
+    width: 38,
+    height: 38,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 12,
   },
-  menuItemTextContainer: {
-    gap: 2,
+  menuItemTextCol: {
+    flex: 1,
   },
   menuItemLabel: {
     fontSize: 14,
     fontWeight: '700',
-    color: COLORS.text,
+    color: '#1A1A1A',
   },
-  menuItemValue: {
+  menuItemSub: {
     fontSize: 11,
-    color: COLORS.textSecondary,
+    color: '#888888',
+    marginTop: 2,
   },
-  versionText: {
-    textAlign: 'center',
-    color: COLORS.textMuted,
-    fontSize: 11,
-    marginVertical: SPACING[8],
-  },
-  notLoggedIn: {
-    flex: 1,
-    justifyContent: 'center',
+
+  sectionHeaderRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    padding: 40,
-    backgroundColor: '#fff',
+    justifyContent: 'space-between',
+    marginBottom: 12,
   },
-  notLoggedInTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginTop: 20,
-    color: '#333',
+  sectionHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
   },
-  notLoggedInText: {
-    textAlign: 'center',
-    color: '#666',
-    marginTop: 10,
-    marginBottom: 30,
-  },
-  loginBtn: {
-    backgroundColor: '#FFB500',
-    paddingHorizontal: 40,
-    paddingVertical: 15,
+  addBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 12,
   },
-  loginBtnText: {
-    fontWeight: 'bold',
-    color: '#333',
-    fontSize: 16,
+  addBtnText: {
+    color: '#D97706',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+
+  addressCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFDF0',
+    borderWidth: 1.5,
+    borderColor: '#FFB800',
+    borderRadius: 16,
+    padding: 14,
+    marginTop: 4,
+  },
+  addressStreet: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1A1A1A',
+  },
+  addressSub: {
+    fontSize: 12,
+    color: '#666666',
+    marginTop: 2,
+  },
+  patternLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#D97706',
+    marginTop: 8,
+  },
+  trashBtn: {
+    padding: 6,
+  },
+  noAddressText: {
+    textAlign: 'center',
+    fontSize: 12,
+    color: '#999999',
+    paddingVertical: 12,
+  },
+
+  versionText: {
+    textAlign: 'center',
+    fontSize: 11,
+    color: '#CCCCCC',
+    marginTop: 8,
+    fontWeight: '600',
   },
 });

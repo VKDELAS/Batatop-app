@@ -14,8 +14,8 @@ import {
   Alert,
   Clipboard,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useState, useRef } from 'react';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { useState, useRef, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { useProdutos } from './hooks/useProdutos';
@@ -187,8 +187,18 @@ function DestaqueMiniCard({ produto }) {
 export default function Home() {
   const router = useRouter();
   const { produtos, loading } = useProdutos();
-  const onScroll = useScrollHandler(); // retorna Animated.event pronto
-  const headerHeight = useHeaderHeight(); // altura real do header
+  const { onScroll, resetHeader } = useScrollHandler();
+  const headerHeight = useHeaderHeight();
+  const scrollRef = useRef(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      resetHeader();
+      setTimeout(() => {
+        scrollRef.current?.scrollTo({ y: 0, animated: false });
+      }, 50);
+    }, [resetHeader])
+  );
 
   const maisPedidos = produtos.slice(0, 4);
   const destaques = produtos.slice(0, 6);
@@ -201,6 +211,7 @@ export default function Home() {
   return (
     <View style={s.container}>
       <ScrollView
+        ref={scrollRef}
         style={s.scroll}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: SPACING[10], paddingTop: headerHeight }}
@@ -273,17 +284,17 @@ export default function Home() {
             contentContainerStyle={s.catRow}
           >
             {[
-              { label: 'Batatas',   icon: 'flame-outline' },
-              { label: 'Macarrão', icon: 'restaurant-outline' },
-              { label: 'Bebidas',  icon: 'wine-outline' },
-              { label: 'Promoções',icon: 'pricetag-outline' },
+              { label: 'Batatas',   icon: 'flame-outline',      cat: 'Batatas'  },
+              { label: 'Macarrão', icon: 'restaurant-outline',  cat: 'Macarrão' },
+              { label: 'Bebidas',  icon: 'wine-outline',        cat: 'Bebidas'  },
+              { label: 'Promoções',icon: 'pricetag-outline',    cat: 'Todas'    },
             ].map((cat) => (
               <Pressable
                 key={cat.label}
                 style={s.catPill}
-                onPress={() => router.push('/cardapio')}
+                onPress={() => router.push({ pathname: '/cardapio', params: { categoria: cat.cat } })}
               >
-                <Ionicons name={cat.icon} size={14} color={COLORS.textSecondary} />
+                <Ionicons name={cat.icon} size={15} color="#EA580C" />
                 <Text style={s.catPillText}>{cat.label}</Text>
               </Pressable>
             ))}
@@ -389,7 +400,7 @@ const s = StyleSheet.create({
   // ── HERO COM FUNDO ────────────────────────────────────────────────────────
   heroBg: {
     width: '100%',
-    height: 300,
+    height: 250,
   },
   heroOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -563,18 +574,23 @@ const s = StyleSheet.create({
   catPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: SPACING[4],
+    gap: 6,
+    paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.backgroundCard,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 3,
+    elevation: 1,
   },
   catPillText: {
     fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: '#1A1A1A',
   },
 
   // ── MINI CAROUSEL (Em alta) ───────────────────────────────────────────────

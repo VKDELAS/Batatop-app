@@ -138,10 +138,7 @@ export default function ProdutoDetail() {
       observacoes,
     });
 
-    Alert.alert('Adicionado!', `${produto.nome} foi adicionado ao carrinho.`, [
-      { text: 'Continuar', onPress: () => router.back() },
-      { text: 'Ver carrinho', onPress: () => router.push('/cart') },
-    ]);
+    router.back();
   };
 
   if (loading) {

@@ -169,6 +169,9 @@ export default function Checkout() {
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr]               = useState<string | null>(null);
   const [couponData, setCouponData] = useState<any>(null);
+  const [couponInput, setCouponInput]     = useState("");
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponError, setCouponError]     = useState<string | null>(null);
 
   const cepDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -238,13 +241,82 @@ export default function Checkout() {
     })();
   }, [session?.user]);
 
-  // ── Load coupon ───────────────────────────────────────────────────────────
+  // ── Coupon: validate + apply ─────────────────────────────────────────────
+  async function applyCoupon(rawCode: string) {
+    const code = rawCode.trim().toUpperCase();
+    if (!code) { setCouponError("Digite um cupom"); return; }
+
+    setCouponLoading(true);
+    setCouponError(null);
+    try {
+      const { data, error } = await supabase
+        .from("coupons")
+        .select("*")
+        .ilike("code", code)
+        .maybeSingle();
+
+      if (error || !data) {
+        setCouponError("Cupom não encontrado");
+        setCouponData(null);
+        return;
+      }
+      if (!data.active) {
+        setCouponError("Esse cupom não está mais ativo");
+        setCouponData(null);
+        return;
+      }
+      if (data.expires_at && new Date(data.expires_at) < new Date()) {
+        setCouponError("Esse cupom expirou");
+        setCouponData(null);
+        return;
+      }
+      if (data.max_uses != null && (data.current_uses ?? 0) >= data.max_uses) {
+        setCouponError("Esse cupom atingiu o limite de usos");
+        setCouponData(null);
+        return;
+      }
+      if (data.min_order_value && subtotal < Number(data.min_order_value)) {
+        setCouponError(
+          `Pedido mínimo de R$ ${Number(data.min_order_value).toFixed(2).replace(".", ",")} para usar este cupom`
+        );
+        setCouponData(null);
+        return;
+      }
+      if (data.max_uses_per_user && session?.user?.id) {
+        const { count } = await supabase
+          .from("orders")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", session.user.id)
+          .eq("coupon_code", data.code);
+        if ((count ?? 0) >= data.max_uses_per_user) {
+          setCouponError("Você já usou esse cupom o máximo de vezes permitido");
+          setCouponData(null);
+          return;
+        }
+      }
+
+      setCouponData(data);
+      setCouponInput(data.code);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {
+      setCouponError("Erro ao validar cupom. Tente novamente.");
+      setCouponData(null);
+    } finally {
+      setCouponLoading(false);
+    }
+  }
+
+  function removeCoupon() {
+    setCouponData(null);
+    setCouponInput("");
+    setCouponError(null);
+  }
+
+  // ── Load coupon vindo por link (ex: compartilhamento) ───────────────────
   useEffect(() => {
     if (!couponCode) return;
-    (async () => {
-      const { data } = await supabase.from("coupons").select("*").eq("code", couponCode).maybeSingle();
-      if (data) setCouponData(data);
-    })();
+    setCouponInput(String(couponCode).toUpperCase());
+    applyCoupon(String(couponCode));
   }, [couponCode]);
 
   // ── CEP auto-lookup ───────────────────────────────────────────────────────
@@ -556,6 +628,21 @@ export default function Checkout() {
           contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 160 }}
           keyboardShouldPersistTaps="handled"
         >
+
+          {/* ── Intro ── */}
+          <View style={styles.introCard}>
+            <View style={styles.introIconWrap}>
+              <Ionicons name="bag-check-outline" size={22} color={colors.brand} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.introTitle}>
+                {name ? `Quase lá, ${name.split(" ")[0]}!` : "Quase lá!"}
+              </Text>
+              <Text style={styles.introSubtitle}>
+                {items.length} {items.length === 1 ? "item" : "itens"} na sacola · confira os dados abaixo
+              </Text>
+            </View>
+          </View>
 
           {/* ── 1. Dados pessoais ── */}
           <SectionLabel icon="person-outline" label="Seus Dados" />
@@ -919,7 +1006,52 @@ export default function Checkout() {
             testID="checkout-order-notes"
           />
 
-          {/* ── 7. Resumo ── */}
+          {/* ── 7. Cupom de desconto ── */}
+          <SectionLabel icon="pricetag-outline" label="Cupom de desconto" />
+          {couponData ? (
+            <View style={styles.couponAppliedRow} testID="coupon-applied">
+              <Ionicons name="checkmark-circle" size={20} color={colors.success} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.couponAppliedCode}>{couponData.code}</Text>
+                <Text style={styles.couponAppliedDesc}>
+                  {couponData.discount_type === "percent"
+                    ? `${Number(couponData.discount_value)}% de desconto aplicado`
+                    : `R$ ${Number(couponData.discount_value).toFixed(2).replace(".", ",")} de desconto aplicado`}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={removeCoupon} testID="coupon-remove">
+                <Ionicons name="close-circle" size={20} color={colors.muted} />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View>
+              <View style={styles.couponRow}>
+                <TextInput
+                  value={couponInput}
+                  onChangeText={(t) => { setCouponInput(t.toUpperCase()); setCouponError(null); }}
+                  placeholder="Digite seu cupom"
+                  placeholderTextColor={colors.muted}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                  testID="coupon-input"
+                />
+                <TouchableOpacity
+                  style={[styles.couponBtn, (couponLoading || !couponInput.trim()) && { opacity: 0.5 }]}
+                  onPress={() => applyCoupon(couponInput)}
+                  disabled={couponLoading || !couponInput.trim()}
+                  testID="coupon-apply"
+                >
+                  {couponLoading
+                    ? <ActivityIndicator color="#FFF" size="small" />
+                    : <Text style={styles.couponBtnText}>Aplicar</Text>}
+                </TouchableOpacity>
+              </View>
+              {couponError && <Text style={styles.fieldErr} testID="coupon-error">{couponError}</Text>}
+            </View>
+          )}
+
+          {/* ── 8. Resumo ── */}
           <View style={styles.summary}>
             <View style={styles.sumRow}>
               <Text style={styles.sumLabel}>Subtotal</Text>
@@ -1065,6 +1197,35 @@ const styles = StyleSheet.create({
   totalValue: { fontWeight: "800", fontSize: 20, color: colors.brand },
 
   err: { color: colors.error, marginTop: 12, fontWeight: "600" },
+
+  // Intro card
+  introCard: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    backgroundColor: colors.brandTertiary, borderRadius: radius.lg,
+    padding: 14, marginBottom: 4,
+  },
+  introIconWrap: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: "#FFF", alignItems: "center", justifyContent: "center",
+  },
+  introTitle: { fontSize: 16, fontWeight: "800", color: colors.onSurface },
+  introSubtitle: { fontSize: 12, color: colors.onSurfaceSecondary, marginTop: 2, fontWeight: "600" },
+
+  // Coupon
+  couponRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  couponBtn: {
+    backgroundColor: colors.brand, borderRadius: radius.md,
+    paddingHorizontal: 18, paddingVertical: 12, alignItems: "center", justifyContent: "center",
+  },
+  couponBtnText: { color: "#FFF", fontWeight: "800", fontSize: 13 },
+  couponAppliedRow: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    backgroundColor: "#EFFAF3", borderRadius: radius.md,
+    borderWidth: 1, borderColor: "#CDEFD9",
+    paddingHorizontal: 14, paddingVertical: 12, marginBottom: 8,
+  },
+  couponAppliedCode: { fontWeight: "800", color: colors.onSurface, fontSize: 14, letterSpacing: 0.5 },
+  couponAppliedDesc: { fontSize: 12, color: colors.success, fontWeight: "600", marginTop: 1 },
 
   // Footer
   footer: { padding: spacing.lg, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.divider },

@@ -1,145 +1,47 @@
-export const MERCADO_PAGO_PUBLIC_KEY = 'APP_USR-219bf65f-e99a-441f-a907-7ef051e9ed52';
+const MERCADO_PAGO_PUBLIC_KEY = process.env.EXPO_PUBLIC_MERCADO_PAGO_PUBLIC_KEY;
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 
-// O Access Token de produção ou de teste deve ser inserido aqui para habilitar a API do Mercado Pago.
-// Se estiver vazio, o app usará um fluxo de simulação de sandbox/teste.
-export let MERCADO_PAGO_ACCESS_TOKEN = '';
-
-export function setAccessToken(token) {
-  MERCADO_PAGO_ACCESS_TOKEN = token;
+async function callBackend(path, body, method = 'POST') {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/mercadopago/${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return await response.json();
+  } catch (err) {
+    return { success: false, error: err.message || 'Erro de conexão com o servidor' };
+  }
 }
 
-/**
- * Cria uma preferência de pagamento (Checkout Pro) no Mercado Pago.
- * Retorna o link de redirecionamento (sandbox ou produção).
- */
+// ── Funções que usavam Access Token: agora passam pelo backend (Vercel) ─────
+
 export async function createPaymentPreference(amount, orderNumber, itemsList = []) {
-  const token = MERCADO_PAGO_ACCESS_TOKEN;
-  if (!token) {
-    // Se não houver token configurado, retorna uma simulação de sucesso
-    return {
-      success: true,
-      simulation: true,
-      checkoutUrl: 'https://sandbox.mercadopago.com.br/checkout/congratulations',
-    };
-  }
-
-  try {
-    const items = itemsList.map(item => ({
-      title: item.nome || 'Item do Pedido',
-      quantity: item.quantity,
-      unit_price: Number(item.precoNum) / 100,
-      currency_id: 'BRL',
-    }));
-
-    if (items.length === 0) {
-      items.push({
-        title: `Pedido #${orderNumber}`,
-        quantity: 1,
-        unit_price: Number(amount),
-        currency_id: 'BRL',
-      });
-    }
-
-    const response = await fetch('https://api.mercadopago.com/checkout/preferences', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        items,
-        external_reference: orderNumber,
-        back_urls: {
-          success: 'batatatop://pedidos',
-          failure: 'batatatop://cart',
-          pending: 'batatatop://pedidos',
-        },
-        auto_return: 'approved',
-      }),
-    });
-
-    const data = await response.json();
-    if (response.ok) {
-      return {
-        success: true,
-        simulation: false,
-        checkoutUrl: data.sandbox_init_point || data.init_point,
-        preferenceId: data.id,
-      };
-    } else {
-      return {
-        success: false,
-        error: data.message || 'Erro ao criar preferência de pagamento no Mercado Pago',
-      };
-    }
-  } catch (err) {
-    return {
-      success: false,
-      error: err.message || 'Erro de conexão com o Mercado Pago',
-    };
-  }
+  return callBackend('preference', { amount, orderNumber, itemsList });
 }
 
-/**
- * Cria um pagamento direto via PIX (Checkout Transparente).
- * Retorna a chave do Pix (Copia e Cola) e o QR Code em Base64.
- */
 export async function createPixPayment(amount, email, name, orderNumber) {
-  const token = MERCADO_PAGO_ACCESS_TOKEN;
-  if (!token) {
-    // Simulação do PIX Sandbox se não houver Token
-    return {
-      success: true,
-      simulation: true,
-      qrCode: '00020101021226870014br.gov.bcb.pix2565pix-sandbox.mercadopago.com5204000053039865802BR5925BatataTopSimulation6009IacangaSP62070503***6304E5A8',
-      qrCodeBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', // pixel branco simulado
-      paymentId: '1234567890',
-    };
-  }
-
-  try {
-    const response = await fetch('https://api.mercadopago.com/v1/payments', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'X-Idempotency-Key': Math.random().toString(36).substring(7),
-      },
-      body: JSON.stringify({
-        transaction_amount: Number(amount),
-        description: `Pedido Batata Top #${orderNumber}`,
-        payment_method_id: 'pix',
-        external_reference: orderNumber,
-        payer: {
-          email: email || 'usuario_teste@testuser.com',
-          first_name: name.split(' ')[0] || 'Cliente',
-          last_name: name.split(' ').slice(1).join(' ') || 'Batatatop',
-        },
-      }),
-    });
-
-    const data = await response.json();
-    if (response.ok) {
-      return {
-        success: true,
-        simulation: false,
-        qrCode: data.point_of_interaction.transaction_data.qr_code,
-        qrCodeBase64: data.point_of_interaction.transaction_data.qr_code_base64,
-        paymentId: data.id,
-      };
-    } else {
-      return {
-        success: false,
-        error: data.message || 'Erro ao gerar pagamento PIX no Mercado Pago',
-      };
-    }
-  } catch (err) {
-    return {
-      success: false,
-      error: err.message || 'Erro de conexão com o Mercado Pago',
-    };
-  }
+  return callBackend('pix', { amount, email, name, orderNumber });
 }
+
+export async function createCardPayment({ amount, token, paymentMethodId, email, name, docNumber, orderNumber }) {
+  return callBackend('card-payment', { amount, token, paymentMethodId, email, name, docNumber, orderNumber });
+}
+
+export async function createCustomer({ email, firstName, lastName }) {
+  return callBackend('customer', { email, firstName, lastName });
+}
+
+export async function saveCardToCustomer({ customerId, cardToken }) {
+  return callBackend('save-card', { customerId, cardToken });
+}
+
+export async function deleteCustomerCard({ customerId, cardId }) {
+  return callBackend('delete-card', { customerId, cardId }, 'DELETE');
+}
+
+// ── Funções que continuam direto no client (só usam a Public Key, é assim ──
+// ── que o Checkout Transparente do Mercado Pago é projetado) ────────────────
 
 /**
  * Tokeniza um cartão de crédito/débito utilizando a Public Key (Checkout Transparente).
@@ -189,251 +91,7 @@ export async function tokenizeCard({
 }
 
 /**
- * Cria um pagamento direto via Cartão de Crédito/Débito (Checkout Transparente).
- */
-export async function createCardPayment({
-  amount,
-  token,
-  paymentMethodId,
-  email,
-  name,
-  docNumber,
-  orderNumber,
-}) {
-  const accessToken = MERCADO_PAGO_ACCESS_TOKEN;
-  if (!accessToken) {
-    // Simulação do Cartão Sandbox se não houver Token
-    return {
-      success: true,
-      simulation: true,
-      paymentId: 'card-simulated-123456',
-      status: 'approved',
-      statusDetail: 'accredited',
-    };
-  }
-
-  try {
-    const cleanDocNumber = docNumber.replace(/\D/g, '');
-    const response = await fetch('https://api.mercadopago.com/v1/payments', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'X-Idempotency-Key': Math.random().toString(36).substring(7),
-      },
-      body: JSON.stringify({
-        transaction_amount: Number(amount),
-        token,
-        description: `Pedido Batata Top #${orderNumber}`,
-        installments: 1,
-        payment_method_id: paymentMethodId,
-        external_reference: orderNumber,
-        payer: {
-          email: email || 'usuario_teste@testuser.com',
-          first_name: name.split(' ')[0] || 'Cliente',
-          last_name: name.split(' ').slice(1).join(' ') || 'Batatatop',
-          identification: {
-            type: 'CPF',
-            number: cleanDocNumber,
-          },
-        },
-      }),
-    });
-
-    const data = await response.json();
-    if (response.ok) {
-      return {
-        success: true,
-        simulation: false,
-        paymentId: data.id,
-        status: data.status, // approved, in_process, rejected
-        statusDetail: data.status_detail,
-      };
-    } else {
-      return {
-        success: false,
-        error: data.message || 'Erro ao processar pagamento via cartão no Mercado Pago',
-      };
-    }
-  } catch (err) {
-    return {
-      success: false,
-      error: err.message || 'Erro de conexão com o Mercado Pago',
-    };
-  }
-}
-
-/**
- * Cria um Customer no Mercado Pago para o usuário.
- * O Customer é o que permite salvar cartões e reutilizá-los depois,
- * sem precisar tokenizar e digitar tudo de novo a cada pedido.
- */
-export async function createCustomer({ email, firstName, lastName }) {
-  const token = MERCADO_PAGO_ACCESS_TOKEN;
-  if (!token) {
-    // Simulação: gera um customer_id fake para permitir testar o fluxo todo
-    return {
-      success: true,
-      simulation: true,
-      customerId: `SIMULATED-CUSTOMER-${Math.random().toString(36).substring(2, 10)}`,
-    };
-  }
-
-  try {
-    const response = await fetch('https://api.mercadopago.com/v1/customers', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email,
-        first_name: firstName || 'Cliente',
-        last_name: lastName || 'Batatatop',
-      }),
-    });
-
-    const data = await response.json();
-
-    if (response.ok) {
-      return { success: true, simulation: false, customerId: data.id };
-    }
-
-    // Se o customer já existir (e-mail duplicado), o MP retorna erro específico.
-    // Nesse caso, buscamos o customer existente em vez de falhar.
-    if (data.cause?.some((c) => c.code === 101 || c.code === '101')) {
-      const existing = await findCustomerByEmail(email);
-      if (existing.success) {
-        return { success: true, simulation: false, customerId: existing.customerId };
-      }
-    }
-
-    return {
-      success: false,
-      error: data.message || 'Erro ao criar cliente no Mercado Pago',
-    };
-  } catch (err) {
-    return { success: false, error: err.message || 'Erro de conexão com o Mercado Pago' };
-  }
-}
-
-/**
- * Busca um Customer existente pelo e-mail (usado como fallback quando
- * createCustomer encontra um customer duplicado).
- */
-async function findCustomerByEmail(email) {
-  const token = MERCADO_PAGO_ACCESS_TOKEN;
-  if (!token) {
-    return { success: false, error: 'Sem access token configurado' };
-  }
-
-  try {
-    const response = await fetch(
-      `https://api.mercadopago.com/v1/customers/search?email=${encodeURIComponent(email)}`,
-      {
-        headers: { 'Authorization': `Bearer ${token}` },
-      }
-    );
-    const data = await response.json();
-    const customer = data.results?.[0];
-    if (response.ok && customer) {
-      return { success: true, customerId: customer.id };
-    }
-    return { success: false, error: 'Cliente não encontrado' };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-}
-
-/**
- * Associa um cartão tokenizado a um Customer do Mercado Pago.
- * O card_id retornado é permanente e pode ser reutilizado em
- * cobranças futuras, sem precisar tokenizar o cartão de novo.
- *
- * Importante: o token passado aqui deve ter sido gerado com
- * tokenizeCard() e, para salvar (e não apenas pagar uma vez),
- * é necessário tokenizar com a flag de cartão "para salvar" —
- * por isso reaproveitamos tokenizeCard normalmente.
- */
-export async function saveCardToCustomer({ customerId, cardToken }) {
-  const token = MERCADO_PAGO_ACCESS_TOKEN;
-  if (!token) {
-    // Simulação: gera um card_id fake
-    return {
-      success: true,
-      simulation: true,
-      cardId: `SIMULATED-CARD-${Math.random().toString(36).substring(2, 10)}`,
-    };
-  }
-
-  try {
-    const response = await fetch(
-      `https://api.mercadopago.com/v1/customers/${customerId}/cards`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ token: cardToken }),
-      }
-    );
-
-    const data = await response.json();
-    if (response.ok) {
-      return {
-        success: true,
-        simulation: false,
-        cardId: data.id,
-        lastFour: data.last_four_digits,
-        paymentMethodId: data.payment_method?.id,
-      };
-    }
-
-    return {
-      success: false,
-      error: data.message || 'Erro ao salvar cartão no Mercado Pago',
-    };
-  } catch (err) {
-    return { success: false, error: err.message || 'Erro de conexão com o Mercado Pago' };
-  }
-}
-
-/**
- * Remove um cartão salvo de um Customer no Mercado Pago.
- */
-export async function deleteCustomerCard({ customerId, cardId }) {
-  const token = MERCADO_PAGO_ACCESS_TOKEN;
-  if (!token) {
-    return { success: true, simulation: true };
-  }
-
-  try {
-    const response = await fetch(
-      `https://api.mercadopago.com/v1/customers/${customerId}/cards/${cardId}`,
-      {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` },
-      }
-    );
-
-    if (response.ok) {
-      return { success: true, simulation: false };
-    }
-    const data = await response.json();
-    return { success: false, error: data.message || 'Erro ao remover cartão' };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-}
-
-/**
- * Cobra usando um cartão já salvo no Customer (sem precisar tokenizar
- * de novo). A maioria dos emissores brasileiros exige o CVV mesmo
- * em cartão salvo, por segurança — por isso ainda pedimos o securityCode.
- *
- * O fluxo correto aqui é: tokenizar o CVV junto com o card_id salvo
- * (token "CVV-only"), e então criar o pagamento com esse token.
+ * Tokeniza o CVV de um cartão já salvo (card_id + security_code), usando a Public Key.
  */
 export async function tokenizeSavedCardCvv({ cardId, securityCode }) {
   try {
@@ -463,8 +121,8 @@ export async function tokenizeSavedCardCvv({ cardId, securityCode }) {
 }
 
 /**
- * Cobra com um cartão salvo: primeiro gera o token combinando
- * card_id + CVV, depois cria o pagamento normalmente.
+ * Cobra com um cartão salvo: tokeniza card_id + CVV no client (Public Key),
+ * depois manda pro backend cobrar (Access Token fica só no servidor).
  */
 export async function chargeWithSavedCard({
   amount,
@@ -476,18 +134,6 @@ export async function chargeWithSavedCard({
   docNumber,
   orderNumber,
 }) {
-  const accessToken = MERCADO_PAGO_ACCESS_TOKEN;
-  if (!accessToken) {
-    // Simulação completa, mesmo padrão do createCardPayment
-    return {
-      success: true,
-      simulation: true,
-      paymentId: 'saved-card-simulated-123456',
-      status: 'approved',
-      statusDetail: 'accredited',
-    };
-  }
-
   const tokenResult = await tokenizeSavedCardCvv({ cardId, securityCode });
   if (!tokenResult.success) {
     return { success: false, error: tokenResult.error };
@@ -503,7 +149,6 @@ export async function chargeWithSavedCard({
     orderNumber,
   });
 }
-
 
 export function guessPaymentMethodId(cardNumber) {
   const clean = cardNumber.replace(/\D/g, '');

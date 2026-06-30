@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -22,22 +21,19 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [erro, setErro] = useState(null);
   const router = useRouter();
 
   const handleLogin = async () => {
     if (!email || !password) {
-      Alert.alert('Erro', 'Por favor, preencha todos os campos.');
+      setErro('Preencha o e-mail e a senha para continuar.');
       return;
     }
-
+    setErro(null);
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
-      Alert.alert('Erro no Login', 'E-mail ou senha incorretos.');
+      setErro('E-mail ou senha incorretos. Verifique e tente novamente.');
       setLoading(false);
     } else {
       router.replace('/');
@@ -100,6 +96,17 @@ export default function LoginScreen() {
             <TouchableOpacity style={styles.forgotPassword}>
               <Text style={styles.forgotPasswordText}>Esqueceu a senha?</Text>
             </TouchableOpacity>
+
+            {/* Card de erro inline */}
+            {erro && (
+              <View style={styles.errCard}>
+                <Ionicons name="alert-circle" size={20} color="#B45309" style={{ marginTop: 1 }} />
+                <Text style={styles.errText}>{erro}</Text>
+                <TouchableOpacity onPress={() => setErro(null)} style={styles.errClose}>
+                  <Ionicons name="close" size={16} color="#B45309" />
+                </TouchableOpacity>
+              </View>
+            )}
 
             <TouchableOpacity
               style={styles.loginButton}
@@ -265,5 +272,29 @@ const styles = StyleSheet.create({
     color: '#FFB500',
     fontSize: 16,
     fontWeight: '800',
+  },
+
+  // ── Erro inline ───────────────────────────────────────────────────────────
+  errCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1.5,
+    borderColor: '#FCD34D',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 16,
+  },
+  errText: {
+    flex: 1,
+    color: '#92400E',
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 19,
+  },
+  errClose: {
+    padding: 2,
+    marginTop: 1,
   },
 });

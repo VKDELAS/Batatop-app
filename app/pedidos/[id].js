@@ -9,13 +9,13 @@ import {
   Image,
   Alert,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useState, useEffect } from 'react';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
+import { useState, useEffect, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { usePedidos } from '../hooks/usePedidos';
-import { useHeaderHeight } from '../_layout';
+import { useHeaderHeight, useScrollHandler } from '../_layout';
 
 // ─── Constantes de status ─────────────────────────────────────────────────────
 
@@ -99,6 +99,16 @@ export default function DetalhesPedido() {
   const router = useRouter();
   const { buscarPedidoPorId, loading } = usePedidos();
   const headerHeight = useHeaderHeight();
+  const { onScroll, resetHeader } = useScrollHandler();
+
+  // Garante que o header global reapareça toda vez que essa tela ganha foco —
+  // sem isso, se o header tivesse sido escondido pelo scroll da lista de
+  // pedidos, ele ficava preso escondido aqui (scrollY global não resetava).
+  useFocusEffect(
+    useCallback(() => {
+      resetHeader();
+    }, [resetHeader])
+  );
 
   const [pedido, setPedido] = useState(null);
   const [erro, setErro] = useState(false);
@@ -180,6 +190,8 @@ export default function DetalhesPedido() {
         style={s.scroll}
         contentContainerStyle={[s.scrollContent, { paddingTop: headerHeight + 16 }]}
         showsVerticalScrollIndicator={false}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
       >
         {/* Cabeçalho inline — título + botão voltar dentro do scroll */}
         <View style={s.inlineHeader}>
@@ -217,7 +229,7 @@ export default function DetalhesPedido() {
             <Text style={s.paymentSubText}>
               Aponte a câmera para o QR Code abaixo ou copie a chave Pix Copia e Cola para efetuar o pagamento.
             </Text>
-            
+
             {pedido.metadata.pix.qr_code_base64 ? (
               <View style={s.qrContainer}>
                 <Image
@@ -604,7 +616,7 @@ const s = StyleSheet.create({
     fontSize: TYPOGRAPHY.sizes.base ?? 16,
     fontWeight: '800',
   },
-  
+
   // Payment box
   paymentBox: {
     borderWidth: 1.5,

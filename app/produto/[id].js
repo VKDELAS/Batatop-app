@@ -49,6 +49,7 @@ export default function ProdutoDetail() {
   const [loading, setLoading] = useState(true);
   const [useFallback, setUseFallback] = useState(false);
   const [quantidade, setQuantidade] = useState(1);
+  // { [adicionalId]: quantidade (0 = não selecionado) }
   const [adicionaisSelecionados, setAdicionaisSelecionados] = useState({});
   const [observacoes, setObservacoes] = useState('');
 
@@ -102,15 +103,28 @@ export default function ProdutoDetail() {
     }
   };
 
-  const toggleAdicional = (adicionalId) => {
+  const incrementAdicional = (adicionalId) => {
     setAdicionaisSelecionados((prev) => ({
       ...prev,
-      [adicionalId]: !prev[adicionalId],
+      [adicionalId]: (prev[adicionalId] || 0) + 1,
     }));
   };
 
+  const decrementAdicional = (adicionalId) => {
+    setAdicionaisSelecionados((prev) => {
+      const current = prev[adicionalId] || 0;
+      if (current <= 1) {
+        const next = { ...prev };
+        delete next[adicionalId];
+        return next;
+      }
+      return { ...prev, [adicionalId]: current - 1 };
+    });
+  };
+
   const totalAdicionais = adicionais.reduce((acc, item) => {
-    return adicionaisSelecionados[item.id] ? acc + item.price : acc;
+    const qty = adicionaisSelecionados[item.id] || 0;
+    return acc + item.price * qty;
   }, 0);
 
   const calcularPrecoTotal = () => {
@@ -124,7 +138,13 @@ export default function ProdutoDetail() {
   const handleAdicionarAoCarrinho = () => {
     if (!produto) return;
 
-    const adicionaisList = adicionais.filter((a) => adicionaisSelecionados[a.id]);
+    // Expande adicionais com quantidade > 0, repetindo o item conforme qty
+    const adicionaisList = adicionais
+      .filter((a) => (adicionaisSelecionados[a.id] || 0) > 0)
+      .flatMap((a) =>
+        Array.from({ length: adicionaisSelecionados[a.id] }, () => a)
+      );
+
     const precoTotalItem = produto.preco + totalAdicionais;
 
     addToCart({
@@ -206,7 +226,7 @@ export default function ProdutoDetail() {
             <Text style={s.semAdicionais}>Nenhum adicional disponível</Text>
           ) : (
             adicionais.map((item) => {
-              const selecionado = !!adicionaisSelecionados[item.id];
+              const qty = adicionaisSelecionados[item.id] || 0;
               return (
                 <View key={item.id} style={s.adicionalItem}>
                   <View style={s.adicionalInfo}>
@@ -215,17 +235,27 @@ export default function ProdutoDetail() {
                       + R$ {item.price.toFixed(2).replace('.', ',')}
                     </Text>
                   </View>
-                  <TouchableOpacity
-                    style={[s.addBtn, selecionado && s.addBtnSelected]}
-                    onPress={() => toggleAdicional(item.id)}
-                    activeOpacity={0.8}
-                  >
-                    <Ionicons
-                      name={selecionado ? 'checkmark' : 'add'}
-                      size={18}
-                      color="#fff"
-                    />
-                  </TouchableOpacity>
+                  <View style={s.adicionalQtyContainer}>
+                    {qty > 0 && (
+                      <TouchableOpacity
+                        style={s.qtyAdicionalBtn}
+                        onPress={() => decrementAdicional(item.id)}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="remove" size={16} color="#333" />
+                      </TouchableOpacity>
+                    )}
+                    {qty > 0 && (
+                      <Text style={s.qtyAdicionalText}>{qty}</Text>
+                    )}
+                    <TouchableOpacity
+                      style={[s.addBtn, qty > 0 && s.addBtnSelected]}
+                      onPress={() => incrementAdicional(item.id)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="add" size={18} color={qty > 0 ? '#fff' : '#333'} />
+                    </TouchableOpacity>
+                  </View>
                 </View>
               );
             })
@@ -348,16 +378,35 @@ const s = StyleSheet.create({
   adicionalInfo: { flex: 1 },
   adicionalNome: { fontSize: 15, fontWeight: '600', color: COLORS.text },
   adicionalPreco: { fontSize: 13, color: '#FFB800', marginTop: 2 },
+  adicionalQtyContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  qtyAdicionalBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 99,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  qtyAdicionalText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.text,
+    minWidth: 18,
+    textAlign: 'center',
+  },
   addBtn: {
     width: 32,
     height: 32,
     borderRadius: 99,
-    backgroundColor: '#FFB800',
+    backgroundColor: '#f0f0f0',
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 12,
   },
-  addBtnSelected: { backgroundColor: COLORS.primary },
+  addBtnSelected: { backgroundColor: '#FFB800' },
 
   // Observacoes
   inputObs: {

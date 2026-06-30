@@ -296,7 +296,7 @@ export default function AdminDashboard() {
                 <Text style={s.menuSub}>Adicione, edite ou remova itens do cardápio</Text>
               </View>
             </View>
-            <Pressable style={[s.menuBtn, { backgroundColor: '#EF4444' }]} onPress={() => Alert.alert('Gerenciar Produtos', 'Disponível em breve no app!')}>
+            <Pressable style={[s.menuBtn, { backgroundColor: '#EF4444' }]} onPress={() => router.push('/admin/produtos')}>
               <Text style={s.menuBtnText}>Acessar Produtos</Text>
             </Pressable>
           </View>
@@ -312,7 +312,7 @@ export default function AdminDashboard() {
                 <Text style={s.menuSub}>Crie e controle cupons de desconto</Text>
               </View>
             </View>
-            <Pressable style={[s.menuBtn, { backgroundColor: '#A855F7' }]} onPress={() => Alert.alert('Gerenciar Cupons', 'Disponível em breve no app!')}>
+            <Pressable style={[s.menuBtn, { backgroundColor: '#A855F7' }]} onPress={() => router.push('/admin/cupons')}>
               <Text style={s.menuBtnText}>Acessar Cupons</Text>
             </Pressable>
           </View>
@@ -328,7 +328,7 @@ export default function AdminDashboard() {
                 <Text style={s.menuSub}>Upload de fotos sem precisar de Git</Text>
               </View>
             </View>
-            <Pressable style={[s.menuBtn, { backgroundColor: '#3B82F6' }]} onPress={() => Alert.alert('Gerenciar Imagens', 'Disponível em breve no app!')}>
+            <Pressable style={[s.menuBtn, { backgroundColor: '#3B82F6' }]} onPress={() => router.push('/admin/imagens')}>
               <Text style={s.menuBtnText}>Acessar Imagens</Text>
             </Pressable>
           </View>
@@ -344,7 +344,7 @@ export default function AdminDashboard() {
                 <Text style={s.menuSub}>Resumo de vendas, faturamento e histórico</Text>
               </View>
             </View>
-            <Pressable style={[s.menuBtn, { backgroundColor: '#10B981' }]} onPress={() => Alert.alert('Gestão Financeira', 'Disponível em breve no app!')}>
+            <Pressable style={[s.menuBtn, { backgroundColor: '#10B981' }]} onPress={() => router.push('/admin/caixa')}>
               <Text style={s.menuBtnText}>Acessar Financeiro</Text>
             </Pressable>
           </View>
@@ -360,7 +360,7 @@ export default function AdminDashboard() {
                 <Text style={s.menuSub}>Visualize avaliações e comentários dos clientes</Text>
               </View>
             </View>
-            <Pressable style={[s.menuBtn, { backgroundColor: '#FFFFFF', borderWidth: 1.5, borderColor: '#3B82F6' }]} onPress={() => Alert.alert('Feedbacks', 'Disponível em breve no app!')}>
+            <Pressable style={[s.menuBtn, { backgroundColor: '#FFFFFF', borderWidth: 1.5, borderColor: '#3B82F6' }]} onPress={() => router.push('/admin/feedbacks')}>
               <Text style={[s.menuBtnText, { color: '#3B82F6' }]}>Ver Feedbacks</Text>
             </Pressable>
           </View>
@@ -373,10 +373,10 @@ export default function AdminDashboard() {
               </View>
               <View style={s.menuTextCol}>
                 <Text style={s.menuTitle}>Gerenciar Promoção</Text>
-                <Text style={s.menuSub}>Configure a promoção ativa no site</Text>
+                <Text style={s.menuSub}>Configure a promoção activa no site</Text>
               </View>
             </View>
-            <Pressable style={[s.menuBtn, { backgroundColor: '#EA580C' }]} onPress={() => Alert.alert('Gerenciar Promoção', 'Disponível em breve no app!')}>
+            <Pressable style={[s.menuBtn, { backgroundColor: '#EA580C' }]} onPress={() => router.push('/admin/promocoes')}>
               <Text style={s.menuBtnText}>Acessar Promoção</Text>
             </Pressable>
           </View>

@@ -21,6 +21,7 @@ import { useScrollHandler, useHeaderHeight } from './_layout';
 // ─── Constantes de status ────────────────────────────────────────────────────
 
 const STATUS_LABELS = {
+  awaiting_payment: 'A Pagar',
   pending: 'Aguardando',
   preparing: 'Preparando',
   ready: 'Pronto',
@@ -29,6 +30,7 @@ const STATUS_LABELS = {
 };
 
 const STATUS_COLORS = {
+  awaiting_payment: '#7C3AED',
   pending: '#D97706',
   preparing: '#EA580C',
   ready: '#2563EB',
@@ -37,6 +39,7 @@ const STATUS_COLORS = {
 };
 
 const STATUS_BG = {
+  awaiting_payment: '#F5F3FF',
   pending: '#FEF3C7',
   preparing: '#FFF7ED',
   ready: '#EFF6FF',
@@ -46,7 +49,7 @@ const STATUS_BG = {
 
 /** Retorna 1–4 (passo atual na barra de progresso). 0 = cancelado. */
 const getStatusStep = (status) => {
-  const map = { pending: 1, preparing: 2, ready: 3, delivered: 4, cancelled: 0 };
+  const map = { awaiting_payment: 0, pending: 1, preparing: 2, ready: 3, delivered: 4, cancelled: -1 };
   return map[status] ?? 1;
 };
 
@@ -55,6 +58,21 @@ const getStatusStep = (status) => {
 function ProgressBar({ status }) {
   const step = getStatusStep(status);
   if (status === 'cancelled') return null;
+
+  // Status especial: aguardando pagamento PIX
+  if (status === 'awaiting_payment') {
+    return (
+      <View style={[pb.wrapper, { backgroundColor: '#F5F3FF', borderRadius: 12, padding: 12, marginTop: 10 }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Ionicons name="qr-code-outline" size={18} color="#7C3AED" />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontWeight: '700', fontSize: 13, color: '#5B21B6' }}>Aguardando pagamento PIX</Text>
+            <Text style={{ fontSize: 11, color: '#7C3AED', marginTop: 2 }}>Pague o QR Code para confirmar seu pedido</Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   const steps = ['Confirmado', 'Preparo', 'Pronto', 'Entregue'];
   const progressPercent = ((step - 1) / 3) * 100;
@@ -204,12 +222,13 @@ function OrderCard({ order, onDetails, onCancel, cancellingId }) {
 // ─── Filtros de status ────────────────────────────────────────────────────────
 
 const FILTER_TABS = [
-  { key: 'all', label: 'Todos' },
-  { key: 'pending', label: 'Aguardando' },
-  { key: 'preparing', label: 'Preparando' },
-  { key: 'ready', label: 'Pronto' },
-  { key: 'delivered', label: 'Entregue' },
-  { key: 'cancelled', label: 'Cancelado' },
+  { key: 'all',              label: 'Todos'      },
+  { key: 'awaiting_payment', label: 'A Pagar'    },
+  { key: 'pending',          label: 'Aguardando' },
+  { key: 'preparing',        label: 'Preparando' },
+  { key: 'ready',            label: 'Pronto'     },
+  { key: 'delivered',        label: 'Entregue'   },
+  { key: 'cancelled',        label: 'Cancelado'  },
 ];
 
 function FilterTabs({ active, onChange }) {

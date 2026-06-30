@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, Switch,
+  TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, Switch, Animated,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -175,6 +175,43 @@ export default function Checkout() {
 
   const cepDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Header local animado (esconde/mostra no scroll) ───────────────────────
+  // Igual ao Header global do _layout.js, só que isolado aqui porque o
+  // checkout usa seu próprio header de back+título em vez do header padrão.
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const headerTranslateY = useRef(new Animated.Value(0)).current;
+  const prevScrollY = useRef(0);
+  const headerVisible = useRef(true);
+  const [headerH, setHeaderH] = useState(60);
+
+  const showHeader = () => {
+    if (!headerVisible.current) {
+      headerVisible.current = true;
+      Animated.spring(headerTranslateY, { toValue: 0, useNativeDriver: true, tension: 80, friction: 12 }).start();
+    }
+  };
+
+  useEffect(() => {
+    const id = scrollY.addListener(({ value }) => {
+      const delta = value - prevScrollY.current;
+      prevScrollY.current = value;
+      if (value <= 10) {
+        showHeader();
+      } else if (delta > 6 && headerVisible.current) {
+        headerVisible.current = false;
+        Animated.timing(headerTranslateY, { toValue: -headerH, duration: 220, useNativeDriver: true }).start();
+      } else if (delta < -6 && !headerVisible.current) {
+        showHeader();
+      }
+    });
+    return () => scrollY.removeListener(id);
+  }, [headerH]);
+
+  const handleScroll = (e: any) => {
+    const y = e?.nativeEvent?.contentOffset?.y ?? 0;
+    scrollY.setValue(y);
+  };
+
   // ── Handle payment method tap ─────────────────────────────────────────────
   async function handleSelectPayment(p: Payment) {
     setPayment(p);
@@ -191,55 +228,51 @@ export default function Checkout() {
     setUseManualCardForm(true);
   }
 
-  // ── Load session ──────────────────────────────────────────────────────────
+  // ── Load session + endereços juntos (sem cascata de 2 useEffects) ─────────
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session?.user) {
-        setName(session.user.user_metadata?.full_name || "");
-        setPhone(session.user.phone || session.user.user_metadata?.phone || "");
-      }
-    });
+    (async () => {
+      // 1. Pega a session
+      const { data: { session: s } } = await supabase.auth.getSession();
+      setSession(s);
+      if (s?.user) {
+        setName(s.user.user_metadata?.full_name || "");
+        setPhone(s.user.phone || s.user.user_metadata?.phone || "");
 
-    // Carregar forma de pagamento preferida do perfil
-    getPreferredPaymentMethod().then(async (savedMethod) => {
-      if (savedMethod) {
-        setPayment(savedMethod as Payment);
-      }
-
-      if (savedMethod === "cartão de crédito" || savedMethod === "cartão de débito") {
-        const cards = await loadSavedCards();
-        const preferredCardId = await getPreferredCardId();
-        const match = preferredCardId
-          ? cards.find((c) => c.id === preferredCardId)
-          : cards.find((c) => c.is_default) || cards[0];
-        if (match) {
-          setSelectedSavedCard(match);
-          setUseManualCardForm(false);
-        } else {
-          // Não há cartão salvo correspondente: usuário precisa preencher manualmente
-          setUseManualCardForm(true);
+        // 2. Busca endereços imediatamente (sem esperar novo render)
+        const { data } = await supabase
+          .from("addresses").select("*")
+          .eq("user_id", s.user.id)
+          .order("is_default", { ascending: false });
+        const addrs = (data ?? []) as Address[];
+        setSavedAddresses(addrs);
+        if (addrs.length > 0) {
+          const def = addrs.find((a) => a.is_default) || addrs[0];
+          applyAddress(def);
         }
       }
-    }).catch(err => console.error("Erro ao ler forma de pagamento preferida:", err));
-  }, []);
 
-  // ── Load saved addresses ──────────────────────────────────────────────────
-  useEffect(() => {
-    if (!session?.user) return;
-    (async () => {
-      const { data } = await supabase
-        .from("addresses").select("*")
-        .eq("user_id", session.user.id)
-        .order("is_default", { ascending: false });
-      const addrs = (data ?? []) as Address[];
-      setSavedAddresses(addrs);
-      if (addrs.length > 0) {
-        const def = addrs.find((a) => a.is_default) || addrs[0];
-        applyAddress(def);
+      // 3. Carrega forma de pagamento preferida
+      try {
+        const savedMethod = await getPreferredPaymentMethod();
+        if (savedMethod) setPayment(savedMethod as Payment);
+        if (savedMethod === "cartão de crédito" || savedMethod === "cartão de débito") {
+          const cards = await loadSavedCards();
+          const preferredCardId = await getPreferredCardId();
+          const match = preferredCardId
+            ? cards.find((c) => c.id === preferredCardId)
+            : cards.find((c) => c.is_default) || cards[0];
+          if (match) {
+            setSelectedSavedCard(match);
+            setUseManualCardForm(false);
+          } else {
+            setUseManualCardForm(true);
+          }
+        }
+      } catch (e) {
+        console.error("Erro ao ler forma de pagamento preferida:", e);
       }
     })();
-  }, [session?.user]);
+  }, []);
 
   // ── Coupon: validate + apply ─────────────────────────────────────────────
   async function applyCoupon(rawCode: string) {
@@ -424,11 +457,14 @@ export default function Checkout() {
       ? neighborhood.trim()
       : "Centro";
 
+    // Arredonda para 2 casas decimais (evita float como 23.990000001 que invalida o MP)
+    const totalFinal = Math.round(total * 100) / 100;
+
     // Mercado Pago Payment Generation
     let pixDetails = null;
     if (payment === "pix") {
       const email = session?.user?.email || "cliente@batatatop.com";
-      const pixResult = await createPixPayment(total, email, name.trim(), orderNumber);
+      const pixResult = await createPixPayment(totalFinal, email, name.trim(), orderNumber);
       if (pixResult.success) {
         pixDetails = {
           qr_code: pixResult.qrCode,
@@ -451,7 +487,7 @@ export default function Checkout() {
       if (selectedSavedCard && !useManualCardForm) {
         // ── Fluxo de cartão salvo: cobra direto com card_id + CVV ──────────
         const cardResult = await chargeWithSavedCard({
-          amount: total,
+          amount: totalFinal,
           cardId: selectedSavedCard.mp_card_id,
           securityCode: savedCardCvv,
           paymentMethodId: selectedSavedCard.payment_method_id,
@@ -508,7 +544,7 @@ export default function Checkout() {
         const paymentMethodId = guessPaymentMethodId(cardNumber);
 
         const cardResult = await createCardPayment({
-          amount: total,
+          amount: totalFinal,
           token: tokenResult.token,
           paymentMethodId,
           email,
@@ -561,7 +597,7 @@ export default function Checkout() {
       total_amount: total,
       discount_amount: discount,
       coupon_code: couponData?.code || null,
-      status: "pending",
+      status: payment === "pix" ? "awaiting_payment" : "pending",
       notes: finalNotes || null,
       delivery_type: deliveryType,
       order_number: orderNumber,
@@ -615,18 +651,23 @@ export default function Checkout() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]} testID="checkout-screen">
       {/* Header */}
-      <View style={styles.header}>
+      <Animated.View
+        style={[styles.header, styles.headerAnimated, { transform: [{ translateY: headerTranslateY }] }]}
+        onLayout={(e) => setHeaderH(e.nativeEvent.layout.height)}
+      >
         <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} testID="checkout-back">
           <Ionicons name="chevron-back" size={22} color={colors.onSurface} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Finalizar pedido</Text>
         <View style={{ width: 40 }} />
-      </View>
+      </Animated.View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView
-          contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 160 }}
+          contentContainerStyle={{ padding: spacing.lg, paddingTop: headerH + spacing.lg, paddingBottom: insets.bottom + 160 }}
           keyboardShouldPersistTaps="handled"
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
         >
 
           {/* ── Intro ── */}
@@ -1079,7 +1120,15 @@ export default function Checkout() {
             </View>
           </View>
 
-          {err && <Text style={styles.err} testID="checkout-error">{err}</Text>}
+          {err && (
+            <View style={styles.errCard} testID="checkout-error">
+              <Ionicons name="alert-circle" size={20} color="#B45309" style={{ marginTop: 1 }} />
+              <Text style={styles.errCardText}>{err}</Text>
+              <TouchableOpacity onPress={() => setErr(null)} style={styles.errClose}>
+                <Ionicons name="close" size={16} color="#B45309" />
+              </TouchableOpacity>
+            </View>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -1122,6 +1171,10 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     paddingHorizontal: spacing.md, paddingVertical: 8,
     borderBottomWidth: 1, borderBottomColor: colors.divider,
+  },
+  headerAnimated: {
+    position: "absolute", top: 0, left: 0, right: 0, zIndex: 10,
+    backgroundColor: colors.surface,
   },
   iconBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   headerTitle: { fontSize: 17, fontWeight: "800", color: colors.onSurface },
@@ -1197,6 +1250,28 @@ const styles = StyleSheet.create({
   totalValue: { fontWeight: "800", fontSize: 20, color: colors.brand },
 
   err: { color: colors.error, marginTop: 12, fontWeight: "600" },
+  errCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    backgroundColor: "#FFFBEB",
+    borderWidth: 1.5,
+    borderColor: "#FCD34D",
+    borderRadius: 14,
+    padding: 14,
+    marginTop: 12,
+  },
+  errCardText: {
+    flex: 1,
+    color: "#92400E",
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 19,
+  },
+  errClose: {
+    padding: 2,
+    marginTop: 1,
+  },
 
   // Intro card
   introCard: {

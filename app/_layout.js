@@ -329,7 +329,7 @@ function Header({ onHeightChange, onRegisterReset }) {
   const isAuthPage    = pathname.includes('auth');
   const isProdutoPage = pathname.includes('produto');
   const isAddressPage = pathname.includes('addresses');
-  const isCartPage    = pathname.includes('cart') || pathname.includes('checkout');
+  const isCheckoutPage = pathname.includes('checkout');
 
   useEffect(() => {
     if (!authResolved) return;
@@ -348,7 +348,7 @@ function Header({ onHeightChange, onRegisterReset }) {
     }
   }, [isAddressPage, user, authResolved]);
 
-  if (isAuthPage || isProdutoPage) return null;
+  if (isAuthPage || isProdutoPage || isCheckoutPage) return null;
 
   return (
     <>

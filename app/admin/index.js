@@ -2,11 +2,13 @@ import { View, Text, ScrollView, StyleSheet, Pressable, ActivityIndicator, Alert
 import { useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../supabaseConfig';
 
 export default function AdminDashboard() {
   const router = useRouter();
-  
+  const insets = useSafeAreaInsets();
+
   const [loading, setLoading] = useState(true);
   const [storeStatus, setStoreStatus] = useState(null);
   const [stats, setStats] = useState({
@@ -23,7 +25,7 @@ export default function AdminDashboard() {
   async function loadDashboard() {
     try {
       setLoading(true);
-      
+
       // 1. Carregar status da loja
       const { data: settingsData } = await supabase
         .from('store_settings')
@@ -67,6 +69,7 @@ export default function AdminDashboard() {
     const newVal = {
       ...currentVal,
       isOpen: !currentVal.isOpen,
+      manualOverride: true,
       lastManualChange: new Date().toISOString()
     };
 
@@ -106,6 +109,28 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
+  const handleToggleDeliveryFee = async () => {
+    if (!storeStatus) return;
+    const currentVal = storeStatus.setting_value;
+    const newVal = {
+      ...currentVal,
+      isDeliveryFeeEnabled: !currentVal.isDeliveryFeeEnabled
+    };
+
+    setLoading(true);
+    const { error } = await supabase
+      .from('store_settings')
+      .update({ setting_value: newVal })
+      .eq('id', storeStatus.id);
+
+    if (error) {
+      Alert.alert('Erro', 'Não foi possível alterar a taxa de entrega.');
+    } else {
+      setStoreStatus({ ...storeStatus, setting_value: newVal });
+    }
+    setLoading(false);
+  };
+
   if (loading && !storeStatus) {
     return (
       <View style={s.loadingContainer}>
@@ -120,7 +145,7 @@ export default function AdminDashboard() {
   return (
     <View style={s.container}>
       {/* Header */}
-      <View style={s.header}>
+      <View style={[s.header, { paddingTop: insets.top + 8 }]}>
         <Pressable onPress={() => router.back()} style={s.backBtn}>
           <Ionicons name="chevron-back" size={24} color="#1A1A1A" />
         </Pressable>
@@ -142,7 +167,7 @@ export default function AdminDashboard() {
           <View style={s.statusRow}>
             <Ionicons name="time-outline" size={16} color="#666" />
             <Text style={s.timeText}>Horário: {currentTime}</Text>
-            
+
             <View style={[s.badge, val.isOpen ? s.badgeOpen : s.badgeClosed]}>
               <Text style={[s.badgeText, val.isOpen ? s.badgeTextOpen : s.badgeTextClosed]}>
                 {val.isOpen ? 'Aberto' : 'Fechado'}
@@ -157,27 +182,41 @@ export default function AdminDashboard() {
           </View>
 
           <View style={s.actionRow}>
-            <Pressable 
-              style={[s.actionBtn, val.isOpen ? s.btnDanger : s.btnSuccess]} 
+            <Pressable
+              style={[s.actionBtn, val.isOpen ? s.btnDanger : s.btnSuccess]}
               onPress={handleToggleStore}
             >
-              <Ionicons 
-                name={val.isOpen ? "close-circle-outline" : "checkmark-circle-outline"} 
-                size={16} 
-                color={val.isOpen ? '#EF4444' : '#10B981'} 
+              <Ionicons
+                name={val.isOpen ? "close-circle-outline" : "checkmark-circle-outline"}
+                size={16}
+                color={val.isOpen ? '#EF4444' : '#10B981'}
               />
               <Text style={[s.actionBtnText, val.isOpen ? { color: '#EF4444' } : { color: '#10B981' }]}>
                 {val.isOpen ? 'Fechar Loja' : 'Abrir Loja'}
               </Text>
             </Pressable>
 
-            <Pressable 
-              style={[s.actionBtn, s.btnPrimary, val.isDeliveryEnabled && s.btnActive]} 
+            <Pressable
+              style={[s.actionBtn, s.btnPrimary, val.isDeliveryEnabled && s.btnActive]}
               onPress={handleToggleDelivery}
             >
               <Ionicons name="bicycle-outline" size={16} color={val.isDeliveryEnabled ? '#FFF' : '#FFB800'} />
               <Text style={[s.actionBtnText, val.isDeliveryEnabled ? { color: '#FFF' } : { color: '#FFB800' }]}>
-                {val.isDeliveryEnabled ? 'Desativar Entregas' : 'Ativar Entregas'}
+                {val.isDeliveryEnabled ? 'Pausar Entregas' : 'Ativar Entregas'}
+              </Text>
+            </Pressable>
+          </View>
+
+          <View style={[s.actionRow, { marginTop: 10 }]}>
+            <Pressable
+              style={[s.actionBtn, s.btnFee, val.isDeliveryFeeEnabled && s.btnFeeActive]}
+              onPress={handleToggleDeliveryFee}
+            >
+              <Ionicons name="cash-outline" size={16} color={val.isDeliveryFeeEnabled ? '#D97706' : '#6B7280'} />
+              <Text style={[s.actionBtnText, { color: val.isDeliveryFeeEnabled ? '#D97706' : '#6B7280' }]}>
+                {val.isDeliveryFeeEnabled
+                  ? `Taxa Ativa (R$ ${Number(val.deliveryFee ?? 3).toFixed(2).replace('.', ',')})`
+                  : 'Taxa Desativada'}
               </Text>
             </Pressable>
           </View>
@@ -363,7 +402,6 @@ const s = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
     paddingHorizontal: 16,
-    paddingTop: 50,
     paddingBottom: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
@@ -487,6 +525,14 @@ const s = StyleSheet.create({
   },
   btnActive: {
     backgroundColor: '#FFB800',
+  },
+  btnFee: {
+    borderColor: '#E5E7EB',
+    backgroundColor: '#F9FAFB',
+  },
+  btnFeeActive: {
+    borderColor: '#FCD34D',
+    backgroundColor: '#FEF3C7',
   },
   actionBtnText: {
     fontSize: 12,

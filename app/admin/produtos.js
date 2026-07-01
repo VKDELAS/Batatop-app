@@ -371,8 +371,8 @@ function ProductCard({ product, onEdit, onDelete, onToggle }) {
           <Ionicons name="image-outline" size={24} color="#D1D5DB" />
         </View>
       )}
-      <View style={{ flex: 1 }}>
-        <Text style={s.prodName}>{product.name}</Text>
+      <View style={s.prodInfoCol}>
+        <Text style={s.prodName} numberOfLines={2}>{product.name}</Text>
         {!!product.description && <Text style={s.prodDesc} numberOfLines={1}>{product.description}</Text>}
         <Text style={s.prodPrice}>R$ {Number(product.price).toFixed(2).replace('.', ',')}</Text>
       </View>
@@ -442,12 +442,13 @@ const s = StyleSheet.create({
   emptyText: { fontSize: 14, color: '#D1D5DB', fontWeight: '600' },
 
   prodCard: { backgroundColor: '#FFF', borderRadius: 18, padding: 14, flexDirection: 'row', gap: 12, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 1 },
-  prodImage: { width: 68, height: 68, borderRadius: 14, backgroundColor: '#F3F4F6' },
+  prodImage: { width: 68, height: 68, borderRadius: 14, backgroundColor: '#F3F4F6', flexShrink: 0 },
   prodImagePlaceholder: { alignItems: 'center', justifyContent: 'center' },
+  prodInfoCol: { flex: 1, flexShrink: 1, minWidth: 0 },
   prodName: { fontSize: 14, fontWeight: '800', color: '#1A1A1A' },
   prodDesc: { fontSize: 11, color: '#9CA3AF', marginTop: 2, fontWeight: '500' },
   prodPrice: { fontSize: 15, fontWeight: '900', color: '#D97706', marginTop: 4 },
-  prodActions: { alignItems: 'flex-end', gap: 8 },
+  prodActions: { alignItems: 'flex-end', gap: 8, flexShrink: 0 },
   availBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   availText: { fontSize: 11, fontWeight: '700' },
   cardActionsRow: { flexDirection: 'row', gap: 6 },

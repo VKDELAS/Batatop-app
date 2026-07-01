@@ -8,8 +8,17 @@ async function callBackend(path, body, method = 'POST') {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    return await response.json();
+    const data = await response.json();
+
+    // Log de debug: mostra a resposta completa do backend no console do Expo.
+    // Útil pra ver o campo "details" com o erro real do Mercado Pago.
+    if (!data.success) {
+      console.log(`[mercadoPago] Erro em "${path}":`, JSON.stringify(data, null, 2));
+    }
+
+    return data;
   } catch (err) {
+    console.log(`[mercadoPago] Erro de conexão em "${path}":`, err.message);
     return { success: false, error: err.message || 'Erro de conexão com o servidor' };
   }
 }
@@ -22,6 +31,15 @@ export async function createPaymentPreference(amount, orderNumber, itemsList = [
 
 export async function createPixPayment(amount, email, name, orderNumber) {
   return callBackend('pix', { amount, email, name, orderNumber });
+}
+
+export async function checkPixStatus(orderId) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/mercadopago/pix-status?orderId=${encodeURIComponent(orderId)}`);
+    return await response.json();
+  } catch (err) {
+    return { success: false, error: err.message || 'Erro de conexão com o servidor' };
+  }
 }
 
 export async function createCardPayment({ amount, token, paymentMethodId, email, name, docNumber, orderNumber }) {

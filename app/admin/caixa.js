@@ -8,6 +8,55 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../supabaseConfig';
 
+// Mapeia os dados do Supabase pro app (idêntico ao pedidos.js)
+const mapOrderData = (o) => {
+  let items = [];
+
+  if (o.order_items && o.order_items.length > 0) {
+    items = o.order_items.map((item) => ({
+      id: item.product_id,
+      name: item.product_name,
+      quantity: item.quantity,
+      price: Number(item.product_price),
+      adicionais: item.adicionais || [],
+      pastaType: item.pasta_type || null,
+      notes: item.notes || null,
+    }));
+  } else if (o.metadata?.items && o.metadata.items.length > 0) {
+    items = o.metadata.items.map((item) => ({
+      id: item.product_id || item.id,
+      name: item.product_name || item.name,
+      quantity: item.quantity,
+      price: Number(item.product_price || item.price),
+      adicionais: item.adicionais || [],
+      pastaType: item.pastaType || null,
+      notes: item.observacoes || null,
+    }));
+  }
+
+  return {
+    id: o.id,
+    orderNumber: o.order_number || 0,
+    customerName: o.customer_name,
+    customerPhone: o.customer_phone,
+    items,
+    total: Number(o.total_amount),
+    status: o.status,
+    paymentMethod: o.payment_method,
+    deliveryType: o.delivery_type || 'delivery',
+    address: o.customer_address,
+    neighborhood: o.customer_neighborhood || '',
+    complement: o.customer_complement || '',
+    createdAt: new Date(o.created_at),
+    notes: o.notes || '',
+    discountAmount: Number(o.discount_amount || 0),
+    couponCode: o.coupon_code || null,
+    user_id: o.user_id || null,
+    metadata: o.metadata || null,
+    wantsCutlery: o.wants_cutlery || false,
+  };
+};
+
 export default function AdminCaixa() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -33,7 +82,6 @@ export default function AdminCaixa() {
     try {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      const todayStr = today.toISOString().split('T')[0];
 
       // Stats hoje
       const { data: todayOrders } = await supabase
@@ -53,14 +101,13 @@ export default function AdminCaixa() {
         totalSales,
       });
 
-      // Histórico por data
+      // Histórico por data (agrupado)
       const { data: history } = await supabase
         .from('orders')
         .select('created_at, total_amount, status')
         .in('status', ['delivered', 'entregue'])
         .order('created_at', { ascending: false });
 
-      // Agrupar por data
       const grouped = {};
       (history || []).forEach(order => {
         const date = new Date(order.created_at).toISOString().split('T')[0];
@@ -97,14 +144,17 @@ export default function AdminCaixa() {
         const end = new Date(date + 'T23:59:59');
         const { data, error } = await supabase
           .from('orders')
-          .select('*')
+          .select('*, order_items (*)') // Join nos itens
           .gte('created_at', start.toISOString())
           .lte('created_at', end.toISOString())
           .in('status', ['delivered', 'entregue'])
           .order('created_at', { ascending: false });
         if (error) throw error;
-        setDateOrders(prev => ({ ...prev, [date]: data || [] }));
-      } catch {
+        
+        const mapped = (data || []).map(mapOrderData);
+        setDateOrders(prev => ({ ...prev, [date]: mapped }));
+      } catch (err) {
+        console.error(err);
         Alert.alert('Erro', 'Não foi possível carregar os pedidos.');
       } finally {
         setLoadingDate(null);
@@ -114,15 +164,16 @@ export default function AdminCaixa() {
 
   // ─── Deletar pedido ──────────────────────────────────────────────
   const handleDelete = (order) => {
-    Alert.alert('Deletar Pedido', `Excluir o pedido #${order.order_number}? Esta ação remove dos registros financeiros.`, [
+    Alert.alert('Deletar Pedido', `Excluir o pedido #${order.orderNumber}? Esta ação remove dos registros financeiros.`, [
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Deletar', style: 'destructive', onPress: async () => {
         try {
+          await supabase.from('order_items').delete().eq('order_id', order.id);
           await supabase.from('orders').delete().eq('id', order.id);
           setDetailsVisible(false);
           // Remover da lista local
           setDateOrders(prev => {
-            const date = new Date(order.created_at).toISOString().split('T')[0];
+            const date = order.createdAt.toISOString().split('T')[0];
             return { ...prev, [date]: (prev[date] || []).filter(o => o.id !== order.id) };
           });
           await loadData();
@@ -234,15 +285,15 @@ export default function AdminCaixa() {
                       (dateOrders[day.date] || []).map(order => (
                         <Pressable key={order.id} style={s.orderRow} onPress={() => { setSelectedOrder(order); setDetailsVisible(true); }}>
                           <View style={s.orderNumBadge}>
-                            <Text style={s.orderNumText}>#{order.order_number}</Text>
+                            <Text style={s.orderNumText}>#{order.orderNumber}</Text>
                           </View>
                           <View style={{ flex: 1 }}>
-                            <Text style={s.orderName}>{order.customer_name}</Text>
+                            <Text style={s.orderName}>{order.customerName}</Text>
                             <Text style={s.orderMeta}>
-                              {new Date(order.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} · {(order.payment_method || '').toUpperCase()}
+                              {order.createdAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} · {(order.paymentMethod || '').toUpperCase()}
                             </Text>
                           </View>
-                          <Text style={s.orderTotal}>R$ {Number(order.total_amount || 0).toFixed(2).replace('.', ',')}</Text>
+                          <Text style={s.orderTotal}>R$ {order.total.toFixed(2).replace('.', ',')}</Text>
                           <Pressable
                             onPress={() => handleDelete(order)}
                             style={s.deleteBtn}
@@ -268,33 +319,51 @@ export default function AdminCaixa() {
             {/* Cabeçalho amarelo */}
             <View style={s.modalHeader}>
               <View>
-                <Text style={s.modalTitle}>Pedido #{selectedOrder.order_number}</Text>
-                <Text style={s.modalSub}>Entregue</Text>
+                <Text style={s.modalTitle}>Pedido #{selectedOrder.orderNumber}</Text>
+                <Text style={s.modalSub}>Entregue · {selectedOrder.deliveryType === 'delivery' ? 'ENTREGA' : 'RETIRADA'}</Text>
               </View>
               <Pressable onPress={() => setDetailsVisible(false)} style={s.modalCloseBtn}>
                 <Ionicons name="close" size={20} color="#FFF" />
               </Pressable>
             </View>
             <ScrollView contentContainerStyle={s.modalBody}>
-              <InfoRow icon="call-outline" label="WhatsApp" value={selectedOrder.customer_phone} />
-              <InfoRow icon="location-outline" label="Endereço" value={selectedOrder.delivery_address || selectedOrder.address} />
-              <InfoRow icon="card-outline" label="Pagamento" value={(selectedOrder.payment_method || '').toUpperCase()} />
+              <InfoRow icon="call-outline" label="WhatsApp" value={selectedOrder.customerPhone} />
+              <InfoRow 
+                icon="location-outline" 
+                label="Endereço" 
+                value={
+                  selectedOrder.deliveryType === 'delivery' 
+                    ? `${selectedOrder.address || ''}${selectedOrder.neighborhood ? ', ' + selectedOrder.neighborhood : ''}${selectedOrder.complement ? ' - ' + selectedOrder.complement : ''}`
+                    : 'Retirada na loja pelo cliente'
+                } 
+              />
+              <InfoRow icon="card-outline" label="Pagamento" value={(selectedOrder.paymentMethod || '').toUpperCase()} />
 
               <Text style={[s.sectionTitle, { marginTop: 16 }]}>Itens</Text>
-              {(Array.isArray(selectedOrder.items)
-                ? selectedOrder.items
-                : JSON.parse(selectedOrder.items || '[]')
-              ).map((item, i) => (
+              {selectedOrder.items.map((item, i) => (
                 <View key={i} style={s.itemLine}>
                   <Text style={s.itemQty}>{item.quantity}x</Text>
-                  <Text style={s.itemName}>{item.name}</Text>
-                  <Text style={s.itemPrice}>R$ {(item.price * item.quantity).toFixed(2)}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.itemName}>{item.name}</Text>
+                    {item.pastaType && <Text style={s.itemDetail}>Massa: {item.pastaType}</Text>}
+                    {Array.isArray(item.adicionais) && item.adicionais.length > 0 && (
+                      <Text style={s.itemDetail}>Adicionais: {item.adicionais.map(a => `${a.quantity}x ${a.name}`).join(', ')}</Text>
+                    )}
+                  </View>
+                  <Text style={s.itemPrice}>R$ {(item.price * item.quantity).toFixed(2).replace('.', ',')}</Text>
                 </View>
               ))}
 
+              {selectedOrder.notes && (
+                <View style={s.notesBox}>
+                  <Text style={s.notesTitle}>Observações:</Text>
+                  <Text style={s.notesText}>{selectedOrder.notes}</Text>
+                </View>
+              )}
+
               <View style={s.totalLine}>
                 <Text style={s.totalLabel}>Total Pago</Text>
-                <Text style={s.totalValue}>R$ {Number(selectedOrder.total_amount || 0).toFixed(2).replace('.', ',')}</Text>
+                <Text style={s.totalValue}>R$ {selectedOrder.total.toFixed(2).replace('.', ',')}</Text>
               </View>
 
               <Pressable style={s.deleteBtnFull} onPress={() => handleDelete(selectedOrder)}>
@@ -312,7 +381,7 @@ export default function AdminCaixa() {
 function InfoRow({ icon, label, value }) {
   return (
     <View style={s.infoRow}>
-      <Ionicons name={icon} size={16} color="#9CA3AF" />
+      <Ionicons name={icon} size={16} color="#9CA3AF" style={{ marginRight: 10 }} />
       <View style={{ flex: 1 }}>
         <Text style={s.infoLabel}>{label}</Text>
         <Text style={s.infoValue}>{value || '—'}</Text>
@@ -371,17 +440,21 @@ const s = StyleSheet.create({
   modalSub: { fontSize: 12, color: 'rgba(255,255,255,0.8)', fontWeight: '700', marginTop: 2 },
   modalCloseBtn: { padding: 4, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 10 },
   modalBody: { padding: 20, paddingBottom: 40 },
-  infoRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  infoRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
   infoLabel: { fontSize: 10, fontWeight: '700', color: '#9CA3AF', textTransform: 'uppercase' },
-  infoValue: { fontSize: 14, fontWeight: '700', color: '#1A1A1A', marginTop: 2 },
+  infoValue: { fontSize: 13, fontWeight: '700', color: '#1A1A1A', marginTop: 2 },
   sectionTitle: { fontSize: 11, fontWeight: '800', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
-  itemLine: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 },
-  itemQty: { fontSize: 13, fontWeight: '900', color: '#D97706', width: 28 },
-  itemName: { flex: 1, fontSize: 13, fontWeight: '700', color: '#1A1A1A' },
+  itemLine: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F9FAFB' },
+  itemQty: { fontSize: 12, fontWeight: '900', color: '#D97706', width: 28 },
+  itemName: { fontSize: 13, fontWeight: '700', color: '#1A1A1A' },
+  itemDetail: { fontSize: 10, color: '#6B7280', marginTop: 2, fontWeight: '600' },
   itemPrice: { fontSize: 13, fontWeight: '800', color: '#1A1A1A' },
   totalLine: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, marginTop: 8, borderTopWidth: 1, borderTopColor: '#F0F0F0' },
   totalLabel: { fontSize: 15, fontWeight: '800', color: '#1A1A1A' },
   totalValue: { fontSize: 22, fontWeight: '900', color: '#FFB800' },
+  notesBox: { marginVertical: 12, padding: 12, backgroundColor: '#FFF9E6', borderRadius: 12, borderWidth: 1, borderColor: '#FEF3C7' },
+  notesTitle: { fontSize: 10, fontWeight: '800', color: '#D97706', textTransform: 'uppercase', marginBottom: 4 },
+  notesText: { fontSize: 12, color: '#92400E', fontWeight: '600', lineHeight: 18 },
   deleteBtnFull: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 24, padding: 14, borderRadius: 16, borderWidth: 1.5, borderColor: '#FEE2E2', backgroundColor: '#FFF' },
   deleteBtnText: { fontSize: 14, fontWeight: '700', color: '#DC2626' },
 });

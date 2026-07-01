@@ -59,39 +59,49 @@ function CupomCard({ codigo, desconto, descricao, tipo = 'percent' }) {
     setTimeout(() => setCopiado(false), 2500);
   };
 
-  const bgLeft  = tipo === 'frete' ? '#166534' : '#7C1D1D';
-  const bgRight = tipo === 'frete' ? '#16A34A' : '#C8A012';
+  // Tema: Amarelo (#FFB800) e Vermelho (#E61E2A)
+  const bgLeft  = tipo === 'frete' ? '#E61E2A' : '#FFB800';
+  const bgRight = tipo === 'frete' ? '#FFF5F6' : '#FFFDF0';
+
+  const isYellow = bgLeft === '#FFB800';
+  const textColorLeft = isYellow ? '#5C3E00' : '#FFFFFF';
+  const badgeBgColor = isYellow ? 'rgba(0,0,0,0.06)' : 'rgba(0,0,0,0.22)';
+  const badgeTextColor = isYellow ? '#5C3E00' : '#FFFFFF';
+  const descTextColor = isYellow ? 'rgba(92,62,0,0.85)' : 'rgba(255,255,255,0.85)';
+
+  const codeLabelColor = isYellow ? '#B8860B' : '#E61E2A';
+  const codeColor = isYellow ? '#5C3E00' : '#E61E2A';
+  const buttonBgColor = isYellow ? 'rgba(255,184,0,0.18)' : 'rgba(230,30,42,0.1)';
+  const buttonTextColor = isYellow ? '#5C3E00' : '#E61E2A';
 
   return (
     <Animated.View style={[s.cupomCard, { transform: [{ scale: scaleAnim }] }]}>
       <Pressable onPress={copiarCodigo} style={s.cupomInner}>
         {/* Lado esquerdo */}
         <View style={[s.cupomLeft, { backgroundColor: bgLeft }]}>
-          <View style={[s.cupomNotch, s.cupomNotchTop]} />
-          <View style={[s.cupomNotch, s.cupomNotchBottom]} />
-          <View style={s.cupomBadge}>
-            <Ionicons name="pricetag" size={10} color="#fff" />
-            <Text style={s.cupomBadgeText}>CUPOM</Text>
+          <View style={[s.cupomBadge, { backgroundColor: badgeBgColor }]}>
+            <Ionicons name="pricetag" size={10} color={badgeTextColor} />
+            <Text style={[s.cupomBadgeText, { color: badgeTextColor }]}>CUPOM</Text>
           </View>
-          <Text style={s.cupomDesconto}>{desconto}</Text>
-          <Text style={s.cupomDesc}>{descricao}</Text>
+          <Text style={[s.cupomDesconto, { color: textColorLeft }]}>{desconto}</Text>
+          <Text style={[s.cupomDesc, { color: descTextColor }]}>{descricao}</Text>
         </View>
 
         {/* Divisor */}
         <View style={[s.cupomDivider, { backgroundColor: bgLeft }]}>
-          <View style={[s.cupomCircle, s.cupomCircleTop,    { backgroundColor: '#F5F5F5' }]} />
-          <View style={[s.cupomCircle, s.cupomCircleBottom, { backgroundColor: '#F5F5F5' }]} />
+          <View style={[s.cupomCircle, s.cupomCircleTop,    { backgroundColor: COLORS.background }]} />
+          <View style={[s.cupomCircle, s.cupomCircleBottom, { backgroundColor: COLORS.background }]} />
         </View>
 
         {/* Lado direito */}
         <View style={[s.cupomRight, { backgroundColor: bgRight }]}>
-          <Text style={s.cupomCodigoLabel}>CODIGO</Text>
-          <Text style={[s.cupomCodigo, copiado && s.cupomCopiado]}>
+          <Text style={[s.cupomCodigoLabel, { color: codeLabelColor }]}>CÓDIGO</Text>
+          <Text style={[s.cupomCodigo, { color: codeColor }, copiado && s.cupomCopiado]}>
             {copiado ? 'OK!' : codigo}
           </Text>
-          <View style={[s.cupomBotao, copiado && { backgroundColor: 'rgba(0,0,0,0.25)' }]}>
-            <Ionicons name={copiado ? 'checkmark' : 'copy-outline'} size={11} color={copiado ? '#fff' : '#1A1A1A'} />
-            <Text style={[s.cupomBotaoText, copiado && { color: '#fff' }]}>
+          <View style={[s.cupomBotao, { backgroundColor: copiado ? 'rgba(0,0,0,0.25)' : buttonBgColor }]}>
+            <Ionicons name={copiado ? 'checkmark' : 'copy-outline'} size={11} color={copiado ? '#fff' : buttonTextColor} />
+            <Text style={[s.cupomBotaoText, { color: copiado ? '#fff' : buttonTextColor }]}>
               {copiado ? 'Copiado!' : 'Copiar'}
             </Text>
           </View>
@@ -146,7 +156,7 @@ function ProdutoCard({ produto, index }) {
               </View>
               <View style={s.prodTag}>
                 <Ionicons name="star" size={10} color={COLORS.primary} />
-                <Text style={s.prodTagText}>4.8</Text>
+                <Text style={s.prodTagText}>{produto.avaliacoes || '4.8'}</Text>
               </View>
             </View>
           </View>
@@ -185,7 +195,19 @@ function DestaqueMiniCard({ produto }) {
         onError={() => setUseFallback(true)}
       />
       <View style={s.miniBody}>
-        <Text style={s.miniNome} numberOfLines={2}>{produto.nome}</Text>
+        <Text style={s.miniNome} numberOfLines={1}>{produto.nome}</Text>
+        
+        <View style={s.miniTags}>
+          <View style={s.miniTag}>
+            <Ionicons name="star" size={9} color={COLORS.primary} />
+            <Text style={s.miniTagText}>{produto.avaliacoes || '4.5'}</Text>
+          </View>
+          <View style={s.miniTag}>
+            <Ionicons name="time-outline" size={9} color={COLORS.textMuted} />
+            <Text style={s.miniTagText}>{produto.tempo} min</Text>
+          </View>
+        </View>
+
         <Text style={s.miniPreco}>{produto.precoFormatado}</Text>
       </View>
     </PressableScale>
@@ -213,8 +235,8 @@ export default function Home() {
   const destaques = produtos.slice(0, 6);
 
   const CUPONS = [
-    { codigo: 'BATATOP15', desconto: '15% OFF', descricao: 'na primeira compra' },
-    { codigo: 'FRETE0', desconto: 'FRETE', descricao: 'grátis em qualquer pedido' },
+    { codigo: 'BATATOP15', desconto: '15% OFF', descricao: 'na primeira compra', tipo: 'percent' },
+    { codigo: 'FRETE0', desconto: 'FRETE', descricao: 'grátis em qualquer pedido', tipo: 'frete' },
   ];
 
   return (
@@ -313,7 +335,7 @@ export default function Home() {
         {/* ══════════════════ DESTAQUES (scroll horizontal) ══════════════════ */}
         <View style={s.section}>
           <View style={s.sectionRow}>
-            <Text style={s.sectionTitle}>Mais pedidos</Text>
+            <Text style={s.sectionTitle}>Destaques</Text>
             <Pressable onPress={() => router.push('/cardapio')} style={s.verTodos}>
               <Text style={s.verTodosText}>Ver todos</Text>
               <Ionicons name="chevron-forward" size={13} color={COLORS.primary} />
@@ -340,7 +362,7 @@ export default function Home() {
           <View style={s.sectionRow}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <View style={s.cupomSectionIcon}>
-                <Ionicons name="pricetag" size={13} color="#FF6B00" />
+                <Ionicons name="pricetag" size={13} color={COLORS.secondary} />
               </View>
               <Text style={s.sectionTitle}>Cupons disponíveis</Text>
             </View>
@@ -642,7 +664,28 @@ const s = StyleSheet.create({
   miniPreco: {
     color: COLORS.primary,
     fontWeight: '800',
-    fontSize: 12,
+    fontSize: 13,
+    marginTop: 2,
+  },
+  miniTags: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginVertical: 3,
+  },
+  miniTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: '#F5F5F5',
+    paddingHorizontal: 4,
+    paddingVertical: 1.5,
+    borderRadius: 4,
+  },
+  miniTagText: {
+    color: COLORS.textSecondary,
+    fontSize: 9,
+    fontWeight: '600',
   },
 
 
@@ -651,11 +694,11 @@ const s = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 7,
-    backgroundColor: '#EA580C15',
+    backgroundColor: '#E61E2A10',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#EA580C25',
+    borderColor: '#E61E2A20',
   },
   cupomRow: {
     paddingHorizontal: SPACING[6],
@@ -663,15 +706,15 @@ const s = StyleSheet.create({
     paddingVertical: 4,
   },
   cupomQtd: {
-    backgroundColor: '#EA580C15',
+    backgroundColor: '#FFB80015',
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 3,
     borderWidth: 1,
-    borderColor: '#EA580C30',
+    borderColor: '#FFB80040',
   },
   cupomQtdText: {
-    color: '#EA580C',
+    color: '#B8860B',
     fontSize: 11,
     fontWeight: '700',
   },
@@ -679,11 +722,11 @@ const s = StyleSheet.create({
     width: 260,
     borderRadius: 16,
     overflow: 'hidden',
-    shadowColor: '#EA580C',
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.22,
-    shadowRadius: 12,
-    elevation: 7,
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 5,
   },
   cupomInner: {
     flexDirection: 'row',

@@ -1,6 +1,6 @@
 import {
   View, Text, ScrollView, StyleSheet, Pressable,
-  ActivityIndicator, Alert, RefreshControl, Modal,
+  ActivityIndicator, Alert, RefreshControl, Modal, Linked, Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -29,7 +29,55 @@ const FILTERS = [
   { key: 'cancelled', label: 'Cancelados',color: '#DC2626' },
 ];
 
-// ─── Componente Principal ──────────────────────────────────────────
+// Mapeia os dados do Supabase
+const mapOrderData = (o) => {
+  let items = [];
+
+  if (o.order_items && o.order_items.length > 0) {
+    items = o.order_items.map((item) => ({
+      id: item.product_id,
+      name: item.product_name,
+      quantity: item.quantity,
+      price: Number(item.product_price),
+      adicionais: item.adicionais || [],
+      pastaType: item.pasta_type || null,
+      notes: item.notes || null,
+    }));
+  } else if (o.metadata?.items && o.metadata.items.length > 0) {
+    items = o.metadata.items.map((item) => ({
+      id: item.product_id || item.id,
+      name: item.product_name || item.name,
+      quantity: item.quantity,
+      price: Number(item.product_price || item.price),
+      adicionais: item.adicionais || [],
+      pastaType: item.pastaType || null,
+      notes: item.observacoes || null,
+    }));
+  }
+
+  return {
+    id: o.id,
+    orderNumber: o.order_number || 0,
+    customerName: o.customer_name,
+    customerPhone: o.customer_phone,
+    items,
+    total: Number(o.total_amount),
+    status: o.status,
+    paymentMethod: o.payment_method,
+    deliveryType: o.delivery_type || 'delivery',
+    address: o.customer_address,
+    neighborhood: o.customer_neighborhood || '',
+    complement: o.customer_complement || '',
+    createdAt: new Date(o.created_at),
+    notes: o.notes || '',
+    discountAmount: Number(o.discount_amount || 0),
+    couponCode: o.coupon_code || null,
+    user_id: o.user_id || null,
+    metadata: o.metadata || null,
+    wantsCutlery: o.wants_cutlery || false,
+  };
+};
+
 export default function AdminPedidos() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -53,20 +101,20 @@ export default function AdminPedidos() {
 
       const { data, error } = await supabase
         .from('orders')
-        .select('*')
+        .select('*, order_items (*)') // Join nos itens do pedido
         .gte('created_at', today.toISOString())
         .order('created_at', { ascending: false });
 
       if (error) throw error;
 
-      const all = data || [];
+      const mapped = (data || []).map(mapOrderData);
 
-      // Notificar novo pedido
-      if (!isInitial && all.length > lastCountRef.current) {
+      // Notificar novo pedido com Haptics
+      if (!isInitial && mapped.length > lastCountRef.current) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       }
-      lastCountRef.current = all.length;
-      setOrders(all);
+      lastCountRef.current = mapped.length;
+      setOrders(mapped);
     } catch (e) {
       console.error('Erro ao carregar pedidos:', e);
     } finally {
@@ -93,8 +141,10 @@ export default function AdminPedidos() {
       if (error) throw error;
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       await loadOrders();
+      
+      // Atualizar objeto selecionado no modal se necessário
       if (selectedOrder?.id === orderId) {
-        setSelectedOrder(prev => ({ ...prev, status: newStatus }));
+        setSelectedOrder(prev => prev ? { ...prev, status: newStatus } : null);
       }
     } catch (e) {
       Alert.alert('Erro', 'Não foi possível atualizar o status.');
@@ -107,7 +157,7 @@ export default function AdminPedidos() {
   const handleDelete = (order) => {
     Alert.alert(
       'Deletar Pedido',
-      `Tem certeza que deseja deletar o Pedido #${order.order_number}?`,
+      `Tem certeza que deseja deletar o Pedido #${order.orderNumber}?`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -115,6 +165,8 @@ export default function AdminPedidos() {
           style: 'destructive',
           onPress: async () => {
             try {
+              // Deleta itens primeiro para evitar constraint error
+              await supabase.from('order_items').delete().eq('order_id', order.id);
               const { error } = await supabase.from('orders').delete().eq('id', order.id);
               if (error) throw error;
               setModalVisible(false);
@@ -141,17 +193,21 @@ export default function AdminPedidos() {
 
   const cfg = (status) => STATUS_CONFIG[status] || STATUS_CONFIG.pending;
 
-  // ─── Render ─────────────────────────────────────────────────────
   return (
-    <View style={[s.container, { paddingTop: insets.top }]}>
+    <View style={[s.container, { paddingBottom: insets.bottom }]}>
       {/* Header */}
-      <View style={s.header}>
+      <View style={[s.header, { paddingTop: insets.top + 8 }]}>
         <Pressable onPress={() => router.back()} style={s.backBtn}>
           <Ionicons name="chevron-back" size={24} color="#1A1A1A" />
         </Pressable>
-        <View style={s.headerTextCol}>
-          <Text style={s.headerTitle}>Gerenciar Pedidos</Text>
-          <Text style={s.headerSub}>Acompanhe e gerencie os pedidos</Text>
+        <View style={s.headerTitleContainer}>
+          <View style={s.headerIconBg}>
+            <Ionicons name="receipt" size={22} color="#D97706" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.headerTitle}>Gerenciar Pedidos</Text>
+            <Text style={s.headerSubtitle}>Acompanhe e gerencie todos os pedidos ativos</Text>
+          </View>
         </View>
         <Pressable onPress={() => { setRefreshing(true); loadOrders(); }} style={s.refreshBtn}>
           <Ionicons name="refresh-outline" size={22} color="#FFB800" />
@@ -225,38 +281,82 @@ export default function AdminPedidos() {
 // ─── Card de Pedido ────────────────────────────────────────────────
 function OrderCard({ order, cfg, updatingId, onStatusChange, onPress, onDelete }) {
   const c = cfg(order.status);
-  const items = Array.isArray(order.items) ? order.items : (typeof order.items === 'string' ? JSON.parse(order.items) : []);
+  
+  // Detalhes de entrega
+  const isDelivery = order.deliveryType === 'delivery';
+  const fullAddress = isDelivery 
+    ? `${order.address || ''}${order.neighborhood ? ', ' + order.neighborhood : ''}${order.complement ? ' - ' + order.complement : ''}`
+    : 'Retirada na Loja';
 
   return (
     <Pressable style={[s.card, { borderLeftColor: c.color }]} onPress={onPress}>
       {/* Cabeçalho do card */}
       <View style={[s.cardHeader, { backgroundColor: c.bg }]}>
         <View style={s.cardHeaderLeft}>
-          <View style={[s.statusBadge, { backgroundColor: c.color }]}>
-            <Ionicons name={c.icon} size={12} color="#FFF" />
-            <Text style={s.statusBadgeText}>{c.label}</Text>
+          <View style={s.badgeRow}>
+            <View style={[s.statusBadge, { backgroundColor: c.color }]}>
+              <Ionicons name={c.icon} size={10} color="#FFF" />
+              <Text style={s.statusBadgeText}>{c.label.toUpperCase()}</Text>
+            </View>
+            <View style={[s.typeBadge, { backgroundColor: isDelivery ? '#FFF' : '#EEF2F6', borderColor: isDelivery ? '#FFB800' : '#475569' }]}>
+              <Ionicons name={isDelivery ? "bicycle-outline" : "storefront-outline"} size={10} color={isDelivery ? '#D97706' : '#475569'} />
+              <Text style={[s.typeBadgeText, { color: isDelivery ? '#D97706' : '#475569' }]}>
+                {isDelivery ? 'ENTREGA' : 'RETIRADA'}
+              </Text>
+            </View>
           </View>
-          <Text style={s.orderNum}>Pedido #{order.order_number}</Text>
+          <Text style={s.orderNum}>Pedido #{order.orderNumber}</Text>
           <Text style={s.orderTime}>
-            {new Date(order.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} • {order.customer_name}
+            {order.createdAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} • {order.customerName}
           </Text>
         </View>
         <View style={s.cardHeaderRight}>
-          <Text style={s.cardTotal}>R$ {Number(order.total_amount || 0).toFixed(2).replace('.', ',')}</Text>
+          <Text style={s.cardTotal}>R$ {order.total.toFixed(2).replace('.', ',')}</Text>
           <Pressable onPress={onDelete} style={s.deleteBtn} hitSlop={8}>
             <Ionicons name="trash-outline" size={16} color="#DC2626" />
           </Pressable>
         </View>
       </View>
 
-      {/* Itens resumido */}
+      {/* Itens detalhados */}
       <View style={s.cardBody}>
-        <Text style={s.itemsSummary} numberOfLines={1}>
-          {items.map(i => `${i.quantity}x ${i.name}`).join(' · ')}
-        </Text>
-        <Text style={s.addressText} numberOfLines={1}>
-          <Ionicons name="location-outline" size={11} /> {order.delivery_address || order.address || '—'}
-        </Text>
+        <View style={s.itemListContainer}>
+          {order.items.map((i, idx) => (
+            <View key={idx} style={s.itemShortRow}>
+              <Text style={s.itemShortQty}>{i.quantity}x</Text>
+              <Text style={s.itemShortName} numberOfLines={1}>{i.name}</Text>
+              {i.pastaType && <Text style={s.itemShortPasta}>({i.pastaType})</Text>}
+            </View>
+          ))}
+        </View>
+
+        {/* Endereço */}
+        <View style={s.addressRow}>
+          <Ionicons name={isDelivery ? "location" : "storefront"} size={12} color="#9CA3AF" />
+          <Text style={s.addressText} numberOfLines={1}>
+            {fullAddress || 'Endereço não informado'}
+          </Text>
+        </View>
+
+        {/* Informações adicionais rápidas */}
+        <View style={s.metaRow}>
+          <View style={s.metaPill}>
+            <Ionicons name="wallet-outline" size={11} color="#6B7280" />
+            <Text style={s.metaPillText}>{(order.paymentMethod || '').toUpperCase()}</Text>
+          </View>
+          {order.wantsCutlery && (
+            <View style={[s.metaPill, { backgroundColor: '#FFF7ED', borderColor: '#FFEDD5' }]}>
+              <Ionicons name="restaurant-outline" size={11} color="#EA580C" />
+              <Text style={[s.metaPillText, { color: '#EA580C' }]}>Enviar Talheres</Text>
+            </View>
+          )}
+          {order.couponCode && (
+            <View style={[s.metaPill, { backgroundColor: '#F3E8FF', borderColor: '#E9D5FF' }]}>
+              <Ionicons name="pricetag-outline" size={11} color="#7C3AED" />
+              <Text style={[s.metaPillText, { color: '#7C3AED' }]}>{order.couponCode}</Text>
+            </View>
+          )}
+        </View>
       </View>
 
       {/* Botões de ação */}
@@ -301,7 +401,14 @@ function ActionBtn({ label, icon, color, outline, loading, onPress }) {
 function OrderModal({ visible, order, cfg, updatingId, onClose, onStatusChange, onDelete }) {
   if (!order) return null;
   const c = cfg(order.status);
-  const items = Array.isArray(order.items) ? order.items : (typeof order.items === 'string' ? JSON.parse(order.items || '[]') : []);
+  const isDelivery = order.deliveryType === 'delivery';
+
+  // Abrir WhatsApp do cliente
+  const handleWhatsApp = () => {
+    const cleanPhone = order.customerPhone.replace(/\D/g, '');
+    const url = `https://wa.me/55${cleanPhone}`;
+    Linking.openURL(url).catch(() => Alert.alert('Erro', 'Não foi possível abrir o WhatsApp.'));
+  };
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
@@ -309,10 +416,10 @@ function OrderModal({ visible, order, cfg, updatingId, onClose, onStatusChange, 
         {/* Modal Header */}
         <View style={[s.modalHeader, { backgroundColor: c.color }]}>
           <View>
-            <Text style={s.modalTitle}>Pedido #{order.order_number}</Text>
+            <Text style={s.modalTitle}>Pedido #{order.orderNumber}</Text>
             <View style={s.modalStatusRow}>
               <Ionicons name={c.icon} size={14} color="#FFF" />
-              <Text style={s.modalStatus}>{c.label}</Text>
+              <Text style={s.modalStatus}>{c.label.toUpperCase()} · {isDelivery ? 'ENTREGA' : 'RETIRADA'}</Text>
             </View>
           </View>
           <Pressable onPress={onClose} style={s.modalCloseBtn}>
@@ -321,35 +428,57 @@ function OrderModal({ visible, order, cfg, updatingId, onClose, onStatusChange, 
         </View>
 
         <ScrollView style={s.modalBody} contentContainerStyle={{ paddingBottom: 40 }}>
+          
+          {/* Ações Rápidas no Modal */}
+          <View style={s.modalQuickActions}>
+            <Pressable style={s.whatsappBtn} onPress={handleWhatsApp}>
+              <Ionicons name="logo-whatsapp" size={16} color="#FFF" />
+              <Text style={s.whatsappBtnText}>WhatsApp do Cliente</Text>
+            </Pressable>
+          </View>
+
           {/* Cliente */}
-          <SectionLabel icon="person-outline" label="Cliente" />
-          <InfoRow icon="person-outline" label="Nome" value={order.customer_name} />
-          <InfoRow icon="call-outline" label="Telefone" value={order.customer_phone} />
-          <InfoRow icon="location-outline" label="Endereço" value={order.delivery_address || order.address || '—'} />
-          <InfoRow icon="card-outline" label="Pagamento" value={(order.payment_method || '').toUpperCase()} />
+          <SectionLabel icon="person-outline" label="Dados do Cliente" />
+          <InfoRow icon="person-outline" label="Nome" value={order.customerName} />
+          <InfoRow icon="call-outline" label="Telefone" value={order.customerPhone} />
+          <InfoRow 
+            icon="location-outline" 
+            label="Endereço de Entrega" 
+            value={
+              isDelivery
+                ? `${order.address || ''}${order.neighborhood ? '\nBairro: ' + order.neighborhood : ''}${order.complement ? '\nComp: ' + order.complement : ''}`
+                : 'Retirada na loja pelo cliente'
+            } 
+          />
+          <InfoRow icon="card-outline" label="Forma de Pagamento" value={(order.paymentMethod || '').toUpperCase()} />
+
+          {/* Opções especiais */}
+          <SectionLabel icon="options-outline" label="Preferências" />
+          <InfoRow icon="restaurant-outline" label="Enviar Talheres?" value={order.wantsCutlery ? 'Sim' : 'Não'} />
 
           {/* Itens */}
           <SectionLabel icon="basket-outline" label="Itens do Pedido" />
-          {items.map((item, i) => (
+          {order.items.map((item, i) => (
             <View key={i} style={s.itemRow}>
               <View style={s.itemQtyBadge}>
                 <Text style={s.itemQty}>{item.quantity}x</Text>
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={s.itemName}>{item.name}</Text>
-                {item.pastaType && <Text style={s.itemDetail}>Tipo: {item.pastaType}</Text>}
+                {item.pastaType && <Text style={s.itemDetail}>Tipo de Massa: {item.pastaType}</Text>}
                 {Array.isArray(item.adicionais) && item.adicionais.length > 0 && (
-                  <Text style={s.itemDetail}>+ {item.adicionais.map(a => `${a.quantity}x ${a.name}`).join(', ')}</Text>
+                  <Text style={s.itemDetail}>Adicionais: {item.adicionais.map(a => `${a.quantity}x ${a.name}`).join(', ')}</Text>
                 )}
+                {item.notes && <Text style={s.itemNote}>Obs Item: "{item.notes}"</Text>}
               </View>
-              <Text style={s.itemPrice}>R$ {(item.price * item.quantity).toFixed(2)}</Text>
+              <Text style={s.itemPrice}>R$ {(item.price * item.quantity).toFixed(2).replace('.', ',')}</Text>
             </View>
           ))}
 
-          {/* Observações */}
+          {/* Observações do pedido */}
           {!!order.notes && (
             <>
-              <SectionLabel icon="document-text-outline" label="Observações" />
+              <SectionLabel icon="document-text-outline" label="Observações do Pedido" />
               <View style={s.notesBox}>
                 <Text style={s.notesText}>{order.notes}</Text>
               </View>
@@ -357,10 +486,22 @@ function OrderModal({ visible, order, cfg, updatingId, onClose, onStatusChange, 
           )}
 
           {/* Totais */}
+          <SectionLabel icon="cash-outline" label="Valores" />
           <View style={s.totalsBox}>
+            <View style={s.totalDetailLine}>
+              <Text style={s.totalDetailLabel}>Subtotal</Text>
+              <Text style={s.totalDetailVal}>R$ {(order.total + order.discountAmount).toFixed(2).replace('.', ',')}</Text>
+            </View>
+            {order.discountAmount > 0 && (
+              <View style={s.totalDetailLine}>
+                <Text style={[s.totalDetailLabel, { color: '#059669' }]}>Desconto {order.couponCode ? `(${order.couponCode})` : ''}</Text>
+                <Text style={[s.totalDetailVal, { color: '#059669' }]}>- R$ {order.discountAmount.toFixed(2).replace('.', ',')}</Text>
+              </View>
+            )}
+            <View style={s.modalTotalDivider} />
             <View style={s.totalRow}>
-              <Text style={s.totalLabel}>Total</Text>
-              <Text style={s.totalValue}>R$ {Number(order.total_amount || 0).toFixed(2).replace('.', ',')}</Text>
+              <Text style={s.totalLabel}>Total Pago</Text>
+              <Text style={s.totalValue}>R$ {order.total.toFixed(2).replace('.', ',')}</Text>
             </View>
           </View>
 
@@ -369,29 +510,29 @@ function OrderModal({ visible, order, cfg, updatingId, onClose, onStatusChange, 
             <View style={s.modalActions}>
               {order.status === 'pending' && (
                 <Pressable style={[s.modalActionBtn, { backgroundColor: '#2563EB' }]} onPress={() => onStatusChange(order.id, 'preparing')} disabled={updatingId === order.id}>
-                  {updatingId === order.id ? <ActivityIndicator color="#FFF" /> : <><Ionicons name="restaurant-outline" size={18} color="#FFF" /><Text style={s.modalActionText}>Preparar</Text></>}
+                  {updatingId === order.id ? <ActivityIndicator color="#FFF" /> : <><Ionicons name="restaurant-outline" size={18} color="#FFF" /><Text style={s.modalActionText}>Preparar Pedido</Text></>}
                 </Pressable>
               )}
               {(order.status === 'preparing' || order.status === 'preparo') && (
                 <Pressable style={[s.modalActionBtn, { backgroundColor: '#7C3AED' }]} onPress={() => onStatusChange(order.id, 'ready')} disabled={updatingId === order.id}>
-                  {updatingId === order.id ? <ActivityIndicator color="#FFF" /> : <><Ionicons name="checkmark-circle-outline" size={18} color="#FFF" /><Text style={s.modalActionText}>Pronto</Text></>}
+                  {updatingId === order.id ? <ActivityIndicator color="#FFF" /> : <><Ionicons name="checkmark-circle-outline" size={18} color="#FFF" /><Text style={s.modalActionText}>Marcar como Pronto</Text></>}
                 </Pressable>
               )}
               {order.status === 'ready' && (
                 <Pressable style={[s.modalActionBtn, { backgroundColor: '#059669' }]} onPress={() => onStatusChange(order.id, 'delivered')} disabled={updatingId === order.id}>
-                  {updatingId === order.id ? <ActivityIndicator color="#FFF" /> : <><Ionicons name="checkmark-done-outline" size={18} color="#FFF" /><Text style={s.modalActionText}>Marcar Entregue</Text></>}
+                  {updatingId === order.id ? <ActivityIndicator color="#FFF" /> : <><Ionicons name="checkmark-done-outline" size={18} color="#FFF" /><Text style={s.modalActionText}>Marcar como Entregue</Text></>}
                 </Pressable>
               )}
               <Pressable style={[s.modalActionBtn, { backgroundColor: '#FFF', borderWidth: 1.5, borderColor: '#DC2626' }]} onPress={() => onStatusChange(order.id, 'cancelled')}>
                 <Ionicons name="close-circle-outline" size={18} color="#DC2626" />
-                <Text style={[s.modalActionText, { color: '#DC2626' }]}>Cancelar</Text>
+                <Text style={[s.modalActionText, { color: '#DC2626' }]}>Cancelar Pedido</Text>
               </Pressable>
             </View>
           )}
 
           <Pressable style={s.deleteOrderBtn} onPress={onDelete}>
             <Ionicons name="trash-outline" size={16} color="#DC2626" />
-            <Text style={s.deleteOrderText}>Deletar Pedido</Text>
+            <Text style={s.deleteOrderText}>Deletar Pedido Permanentemente</Text>
           </Pressable>
         </ScrollView>
       </View>
@@ -426,12 +567,46 @@ function InfoRow({ icon, label, value }) {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8F9FA' },
 
-  header: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', paddingHorizontal: 16, paddingBottom: 14, paddingTop: 10, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
-  backBtn: { padding: 8, marginRight: 4 },
-  headerTextCol: { flex: 1 },
-  headerTitle: { fontSize: 17, fontWeight: '800', color: '#1A1A1A' },
-  headerSub: { fontSize: 12, color: '#888', marginTop: 1 },
-  refreshBtn: { padding: 8 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  backBtn: {
+    padding: 8,
+    marginRight: 8,
+  },
+  headerTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  headerIconBg: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: '#FEF3C7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#1A1A1A',
+  },
+  headerSubtitle: {
+    fontSize: 12,
+    color: '#666666',
+    marginTop: 2,
+  },
+  refreshBtn: {
+    padding: 8,
+  },
 
   filterBar: { maxHeight: 80, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
   filterContent: { paddingHorizontal: 12, paddingVertical: 10, gap: 8, flexDirection: 'row' },
@@ -440,27 +615,42 @@ const s = StyleSheet.create({
   filterLabel: { fontSize: 10, fontWeight: '700', color: '#6B7280' },
 
   list: { flex: 1 },
-  listContent: { padding: 12, gap: 10, paddingBottom: 40 },
+  listContent: { padding: 12, gap: 12, paddingBottom: 40 },
 
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadingText: { color: '#9CA3AF', fontWeight: '600' },
   empty: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60, gap: 12 },
   emptyText: { color: '#D1D5DB', fontSize: 15, fontWeight: '700' },
 
-  card: { backgroundColor: '#FFF', borderRadius: 20, borderLeftWidth: 5, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 2 },
+  card: { backgroundColor: '#FFF', borderRadius: 24, borderLeftWidth: 6, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
   cardHeader: { flexDirection: 'row', alignItems: 'flex-start', padding: 14, justifyContent: 'space-between' },
   cardHeaderLeft: { flex: 1 },
-  cardHeaderRight: { alignItems: 'flex-end', gap: 8 },
-  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, alignSelf: 'flex-start', marginBottom: 4 },
-  statusBadgeText: { color: '#FFF', fontSize: 10, fontWeight: '800' },
-  orderNum: { fontSize: 15, fontWeight: '900', color: '#1A1A1A' },
+  cardHeaderRight: { alignItems: 'flex-end', gap: 6 },
+  
+  badgeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  statusBadgeText: { color: '#FFF', fontSize: 9, fontWeight: '900' },
+  typeBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, borderWidth: 1 },
+  typeBadgeText: { fontSize: 9, fontWeight: '900' },
+  
+  orderNum: { fontSize: 16, fontWeight: '900', color: '#1A1A1A' },
   orderTime: { fontSize: 11, color: '#6B7280', fontWeight: '600', marginTop: 2 },
   cardTotal: { fontSize: 16, fontWeight: '900', color: '#1A1A1A' },
   deleteBtn: { padding: 4 },
 
-  cardBody: { paddingHorizontal: 14, paddingBottom: 12, gap: 4 },
-  itemsSummary: { fontSize: 12, color: '#374151', fontWeight: '600' },
-  addressText: { fontSize: 11, color: '#9CA3AF', fontWeight: '500' },
+  cardBody: { paddingHorizontal: 14, paddingBottom: 14, gap: 8 },
+  itemListContainer: { backgroundColor: '#F8F9FA', borderRadius: 14, padding: 10, gap: 4, borderWidth: 1, borderColor: '#F0F0F0' },
+  itemShortRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  itemShortQty: { fontSize: 11, fontWeight: '900', color: '#D97706', width: 20 },
+  itemShortName: { fontSize: 12, fontWeight: '700', color: '#1C1917', flex: 1 },
+  itemShortPasta: { fontSize: 10, color: '#D97706', fontWeight: '600' },
+
+  addressRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  addressText: { fontSize: 12, color: '#4B5563', fontWeight: '600', flex: 1 },
+
+  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  metaPill: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: '#E5E7EB', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, backgroundColor: '#F9FAFB' },
+  metaPillText: { fontSize: 10, fontWeight: '700', color: '#4B5563' },
 
   cardActions: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingBottom: 14, flexWrap: 'wrap' },
   actionBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12, minWidth: 90 },
@@ -471,10 +661,14 @@ const s = StyleSheet.create({
   modalHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', padding: 20, paddingTop: 24 },
   modalTitle: { fontSize: 22, fontWeight: '900', color: '#FFF' },
   modalStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
-  modalStatus: { color: '#FFF', fontSize: 12, fontWeight: '700', opacity: 0.9 },
+  modalStatus: { color: '#FFF', fontSize: 11, fontWeight: '800', opacity: 0.95 },
   modalCloseBtn: { padding: 4, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 10 },
 
   modalBody: { flex: 1 },
+  modalQuickActions: { paddingHorizontal: 16, paddingTop: 16 },
+  whatsappBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#25D366', borderRadius: 14, paddingVertical: 10 },
+  whatsappBtnText: { color: '#FFF', fontSize: 13, fontWeight: '800' },
+
   sectionLabel: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingTop: 20, paddingBottom: 8 },
   sectionLabelText: { fontSize: 10, fontWeight: '800', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: 1 },
 
@@ -483,19 +677,24 @@ const s = StyleSheet.create({
   infoLabel: { fontSize: 10, fontWeight: '700', color: '#9CA3AF', textTransform: 'uppercase' },
   infoValue: { fontSize: 14, fontWeight: '700', color: '#1A1A1A', marginTop: 2 },
 
-  itemRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#F9FAFB' },
+  itemRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#F9FAFB' },
   itemQtyBadge: { width: 36, height: 36, backgroundColor: '#FEF3C7', borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   itemQty: { fontSize: 12, fontWeight: '900', color: '#D97706' },
-  itemName: { fontSize: 14, fontWeight: '700', color: '#1A1A1A' },
-  itemDetail: { fontSize: 11, color: '#6B7280', marginTop: 2 },
+  itemName: { fontSize: 14, fontWeight: '800', color: '#1A1A1A' },
+  itemDetail: { fontSize: 11, color: '#6B7280', marginTop: 2, fontWeight: '600' },
+  itemNote: { fontSize: 11, color: '#DC2626', fontStyle: 'italic', marginTop: 2, fontWeight: '500' },
   itemPrice: { fontSize: 14, fontWeight: '900', color: '#1A1A1A' },
 
   notesBox: { marginHorizontal: 16, padding: 14, backgroundColor: '#FFF9E6', borderRadius: 16, borderWidth: 1, borderColor: '#FEF3C7' },
-  notesText: { fontSize: 13, color: '#92400E', fontWeight: '500', lineHeight: 20 },
+  notesText: { fontSize: 13, color: '#92400E', fontWeight: '600', lineHeight: 20 },
 
-  totalsBox: { marginHorizontal: 16, marginTop: 8, padding: 16, backgroundColor: '#FFF', borderRadius: 16 },
+  totalsBox: { marginHorizontal: 16, padding: 16, backgroundColor: '#FFF', borderRadius: 16, borderWidth: 1, borderColor: '#E5E7EB' },
+  totalDetailLine: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  totalDetailLabel: { fontSize: 12, fontWeight: '700', color: '#6B7280' },
+  totalDetailVal: { fontSize: 12, fontWeight: '700', color: '#1A1A1A' },
+  modalTotalDivider: { height: 1, backgroundColor: '#E5E7EB', marginVertical: 8 },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  totalLabel: { fontSize: 16, fontWeight: '800', color: '#1A1A1A' },
+  totalLabel: { fontSize: 15, fontWeight: '900', color: '#1A1A1A' },
   totalValue: { fontSize: 22, fontWeight: '900', color: '#FFB800' },
 
   modalActions: { marginHorizontal: 16, marginTop: 20, gap: 10 },

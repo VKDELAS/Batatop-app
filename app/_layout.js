@@ -670,7 +670,7 @@ const s = StyleSheet.create({
   /* ── Cart Bar (sacola flutuante) ── */
   cartBar: {
     position: 'absolute',
-    bottom: 70, // fica logo acima da BottomTabBar (altura ~62px + margem)
+    bottom: 85, // fica logo acima da BottomTabBar (altura ~62px + margem)
     left: 16,
     right: 16,
     zIndex: 900,

@@ -9,6 +9,7 @@ import {
   Alert,
   Linking,
   Animated,
+  Modal,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -17,6 +18,7 @@ import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme
 import { usePedidos } from './hooks/usePedidos';
 import { supabase } from '../supabaseConfig';
 import { useScrollHandler, useHeaderHeight } from './_layout';
+import HelpModal from '../components/HelpModal';
 
 // ─── Constantes de status ────────────────────────────────────────────────────
 
@@ -107,7 +109,8 @@ function OrderCard({ order, onDetails, onCancel, cancellingId }) {
   const statusBg = STATUS_BG[order.status] ?? COLORS.borderLight;
   const label = STATUS_LABELS[order.status] ?? order.status;
   const isCancelling = cancellingId === order.id;
-  const canCancel = ['pending', 'preparing'].includes(order.status);
+  const canCancel = ['pending', 'preparing', 'awaiting_payment'].includes(order.status);
+  const [helpVisible, setHelpVisible] = useState(false);
 
   const dateStr = order.createdAt
     ? order.createdAt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -205,16 +208,22 @@ function OrderCard({ order, onDetails, onCancel, cancellingId }) {
               )}
             </Pressable>
           )}
-          <Pressable style={card.btnHelp} onPress={handleWhatsApp}>
-            <Ionicons name="logo-whatsapp" size={14} color="#16A34A" />
+          <Pressable style={card.btnHelp} onPress={() => setHelpVisible(true)}>
+            <Ionicons name="help-circle-outline" size={14} color="#16A34A" />
             <Text style={card.btnHelpText}>Ajuda</Text>
           </Pressable>
           <Pressable style={card.btnDetails} onPress={() => onDetails(order.id)}>
             <Text style={card.btnDetailsText}>Detalhes</Text>
-            <Ionicons name="chevron-forward" size={14} color={COLORS.primary} />
+            <Ionicons name="chevron-forward" size={14} color="#2563EB" />
           </Pressable>
         </View>
       </View>
+
+      <HelpModal
+        visible={helpVisible}
+        onClose={() => setHelpVisible(false)}
+        onContactSupport={handleWhatsApp}
+      />
     </View>
   );
 }
@@ -281,6 +290,7 @@ export default function Pedidos() {
   // initialLoading: spinner só na primeira carga de pedidos (não no polling/realtime)
   const [initialLoading, setInitialLoading] = useState(false);
   const [cancellingId, setCancellingId] = useState(null);
+  const [orderToCancel, setOrderToCancel] = useState(null);
 
   // Ref estável ao userId — lido dentro dos callbacks do canal sem recriar o canal
   const userIdRef = useRef(null);
@@ -321,42 +331,36 @@ export default function Pedidos() {
   }, [userId]);
 
   const handleCancelOrder = (order) => {
+    setOrderToCancel(order);
+  };
+
+  const confirmCancelOrder = async () => {
+    const order = orderToCancel;
+    if (!order) return;
     const num = order.orderNumber || order.id.slice(-4).toUpperCase();
-    Alert.alert(
-      'Cancelar pedido',
-      `Tem certeza que deseja cancelar o pedido #${num}?`,
-      [
-        { text: 'Voltar', style: 'cancel' },
-        {
-          text: 'Cancelar pedido',
-          style: 'destructive',
-          onPress: async () => {
-            setCancellingId(order.id);
-            try {
-              const { error } = await supabase
-                .from('orders')
-                .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-                .eq('id', order.id);
+    setOrderToCancel(null);
+    setCancellingId(order.id);
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+        .eq('id', order.id);
 
-              if (error) throw error;
+      if (error) throw error;
 
-              // Abre WhatsApp igual ao site
-              const msg = encodeURIComponent(
-                `Olá, gostaria de cancelar meu pedido #${num}.\n\n*Detalhes do Pedido:*\nCliente: ${order.customerName}\nTotal: R$ ${order.total.toFixed(2).replace('.', ',')}`
-              );
-              Linking.openURL(`https://wa.me/5514997361015?text=${msg}`);
+      // Abre WhatsApp igual ao site
+      const msg = encodeURIComponent(
+        `Olá, gostaria de cancelar meu pedido #${num}.\n\n*Detalhes do Pedido:*\nCliente: ${order.customerName}\nTotal: R$ ${order.total.toFixed(2).replace('.', ',')}`
+      );
+      Linking.openURL(`https://wa.me/5514997361015?text=${msg}`);
 
-              // Reload silencioso após cancelar — não some a lista
-              await fetchOrders(userIdRef.current, { silent: true });
-            } catch (err) {
-              Alert.alert('Erro', 'Não foi possível cancelar o pedido. Entre em contato pelo WhatsApp.');
-            } finally {
-              setCancellingId(null);
-            }
-          },
-        },
-      ]
-    );
+      // Reload silencioso após cancelar — não some a lista
+      await fetchOrders(userIdRef.current, { silent: true });
+    } catch (err) {
+      Alert.alert('Erro', 'Não foi possível cancelar o pedido. Entre em contato pelo WhatsApp.');
+    } finally {
+      setCancellingId(null);
+    }
   };
 
   useEffect(() => {
@@ -518,6 +522,47 @@ export default function Pedidos() {
         onScroll={onScroll}
         scrollEventThrottle={16}
       />
+
+      {/* Modal de confirmação de cancelamento — substitui o Alert.alert
+          nativo por algo no estilo do app. */}
+      <Modal
+        visible={!!orderToCancel}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setOrderToCancel(null)}
+      >
+        <View style={s.cancelBackdrop}>
+          <View style={s.cancelCard}>
+            <View style={s.cancelIconWrap}>
+              <Ionicons name="alert-circle" size={40} color="#DC2626" />
+            </View>
+            <Text style={s.cancelTitle}>Cancelar pedido</Text>
+            <Text style={s.cancelSubtitle}>
+              Tem certeza que deseja cancelar o pedido{' '}
+              <Text style={s.cancelSubtitleBold}>
+                #{orderToCancel?.orderNumber || orderToCancel?.id?.slice(-4).toUpperCase()}
+              </Text>
+              ? Essa ação não pode ser desfeita.
+            </Text>
+
+            <View style={s.cancelActions}>
+              <Pressable
+                style={s.cancelBtnGhost}
+                onPress={() => setOrderToCancel(null)}
+              >
+                <Text style={s.cancelBtnGhostText}>Voltar</Text>
+              </Pressable>
+              <Pressable
+                style={s.cancelBtnDanger}
+                onPress={confirmCancelOrder}
+              >
+                <Ionicons name="close-circle-outline" size={16} color="#FFF" />
+                <Text style={s.cancelBtnDangerText}>Cancelar Pedido</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -525,6 +570,81 @@ export default function Pedidos() {
 // ─── Estilos ──────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
+  cancelBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  cancelCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: COLORS.white ?? '#FFF',
+    borderRadius: RADIUS.xl ?? 20,
+    padding: 24,
+    alignItems: 'center',
+    ...(SHADOWS?.lg ?? SHADOWS?.md ?? {}),
+  },
+  cancelIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#FEF2F2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  cancelTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.text ?? '#111',
+    marginBottom: 8,
+  },
+  cancelSubtitle: {
+    fontSize: 13.5,
+    color: COLORS.textSecondary ?? '#666',
+    textAlign: 'center',
+    lineHeight: 19,
+    marginBottom: 22,
+  },
+  cancelSubtitleBold: {
+    fontWeight: '800',
+    color: COLORS.text ?? '#111',
+  },
+  cancelActions: {
+    flexDirection: 'row',
+    gap: 10,
+    width: '100%',
+  },
+  cancelBtnGhost: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: RADIUS.lg ?? 12,
+    backgroundColor: COLORS.borderLight ?? '#F0F0F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelBtnGhostText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.textSecondary ?? '#555',
+  },
+  cancelBtnDanger: {
+    flex: 1.3,
+    flexDirection: 'row',
+    gap: 6,
+    paddingVertical: 13,
+    borderRadius: RADIUS.lg ?? 12,
+    backgroundColor: '#DC2626',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelBtnDangerText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFF',
+  },
   container: {
     flex: 1,
     backgroundColor: COLORS.backgroundElevated ?? '#F5F5F5',
@@ -773,12 +893,12 @@ const card = StyleSheet.create({
     paddingHorizontal: SPACING[3] ?? 12,
     paddingVertical: SPACING[2] ?? 8,
     borderRadius: RADIUS.md ?? 8,
-    backgroundColor: COLORS.borderLight ?? '#F0F0F0',
+    backgroundColor: '#EFF6FF',
   },
   btnDetailsText: {
     fontSize: 12,
     fontWeight: '700',
-    color: COLORS.primary,
+    color: '#2563EB',
   },
 });
 

@@ -7,7 +7,6 @@ import {
   Pressable,
   ActivityIndicator,
   Image,
-  ImageBackground,
   FlatList,
   ToastAndroid,
   Platform,
@@ -15,11 +14,19 @@ import {
   Clipboard,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { useState, useRef, useCallback } from 'react';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { useProdutos } from './hooks/useProdutos';
-import { useScrollHandler, useHeaderHeight } from './_layout';
+import {
+  useScrollHandler,
+  useHeaderHeight,
+  useHeaderHidden,
+  HEADER_HYSTERESIS,
+  HEADER_ANIM_DURATION,
+  HEADER_EASING,
+} from './_layout';
 
 // ─── Pressable com scale ───────────────────────────────────────────────────────
 function PressableScale({ children, onPress, style }) {
@@ -196,7 +203,7 @@ function DestaqueMiniCard({ produto }) {
       />
       <View style={s.miniBody}>
         <Text style={s.miniNome} numberOfLines={1}>{produto.nome}</Text>
-        
+
         <View style={s.miniTags}>
           <View style={s.miniTag}>
             <Ionicons name="star" size={9} color={COLORS.primary} />
@@ -214,13 +221,139 @@ function DestaqueMiniCard({ produto }) {
   );
 }
 
+// ─── Categorias (ícones 3D locais) ────────────────────────────────────────────
+const CATEGORIAS = [
+  { label: 'Cardápio',        icon: require('../assets/icones3d/icone cardapio.png'),         route: '/cardapio' },
+  { label: 'Batatas',         icon: require('../assets/icones3d/icone batata.png'),          cat: 'Batatas'  },
+  { label: 'Macarrão',        icon: require('../assets/icones3d/icone macarrao.png'),         cat: 'Macarrão' },
+  { label: 'Bebidas', icon: require('../assets/icones3d/icone bebidas geladas.png'),  cat: 'Bebidas'  },
+];
+
+// ─── Barra flutuante de categorias (aparece quando a grid de categorias sai da tela) ──
+// Literalmente a MESMA animação do header (mesma duração, mesma curva, mesmo
+// esquema translateY+opacity via native driver) — só que ela é 100%
+// absolute/overlay, então nunca empurra o resto do conteúdo (quem empurra é
+// só o spacer do header, lá em cima).
+function CategoriasFlutuantes({ scrollY, categoriasBottomY, headerHidden, router }) {
+  const BAR_SLIDE_DISTANCE = 70; // ~altura da própria barra — sobe/desce igual o header sobe/desce a sua altura
+
+  // hiddenAnim segue a MESMA convenção do headerAnim lá no _layout.js:
+  // 0 = visível, 1 = escondida.
+  const hiddenAnim = useRef(new Animated.Value(1)).current;
+  const visibleRef = useRef(false);
+
+  // headerHidden é um boolean ESTÁVEL (só muda quando o header já terminou de
+  // sumir/aparecer) — é o que evita essa barra decidir mostrar/esconder no
+  // meio da transição do header e desfazer a própria animação no caminho.
+  const headerHiddenRef = useRef(headerHidden);
+  useEffect(() => {
+    headerHiddenRef.current = headerHidden;
+  }, [headerHidden]);
+
+  const animateTo = (shouldShow) => {
+    Animated.timing(hiddenAnim, {
+      toValue: shouldShow ? 0 : 1,
+      duration: HEADER_ANIM_DURATION,
+      easing: HEADER_EASING,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  useEffect(() => {
+    if (categoriasBottomY == null) return;
+    const id = scrollY.addListener(({ value }) => {
+      const visibleNow = visibleRef.current;
+      let shouldShow = visibleNow;
+
+      if (!visibleNow) {
+        // só aparece se o header já sumiu E já passamos da seção de categorias
+        if (headerHiddenRef.current && value > categoriasBottomY + HEADER_HYSTERESIS) {
+          shouldShow = true;
+        }
+      } else {
+        // esconde se o header voltou a aparecer OU se voltamos pra cima da seção
+        if (!headerHiddenRef.current || value < categoriasBottomY - HEADER_HYSTERESIS) {
+          shouldShow = false;
+        }
+      }
+
+      if (shouldShow !== visibleNow) {
+        visibleRef.current = shouldShow;
+        animateTo(shouldShow);
+      }
+    });
+    return () => scrollY.removeListener(id);
+  }, [categoriasBottomY]);
+
+  // Se o header voltar a aparecer enquanto a barra tava visível, some com ela
+  // na hora — sempre pro extremo (0 ou 1), nunca fica parada num valor parcial.
+  useEffect(() => {
+    if (!headerHidden && visibleRef.current) {
+      visibleRef.current = false;
+      animateTo(false);
+    }
+  }, [headerHidden]);
+
+  if (categoriasBottomY == null) return null;
+
+  const translateY = hiddenAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, -BAR_SLIDE_DISTANCE],
+  });
+
+  const opacity = hiddenAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0],
+  });
+
+  return (
+    <Animated.View
+      pointerEvents="box-none"
+      style={[s.miniCatWrap, { opacity, transform: [{ translateY }] }]}
+    >
+      <SafeAreaView edges={['top']} style={{ backgroundColor: 'transparent' }}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={s.miniCatRow}
+        >
+          {CATEGORIAS.map((cat) => (
+            <Pressable
+              key={cat.label}
+              style={s.miniCatPill}
+              onPress={() =>
+                cat.route
+                  ? router.push(cat.route)
+                  : router.push({ pathname: '/cardapio', params: { categoria: cat.cat } })
+              }
+            >
+              <View style={s.miniCatPillIcon}>
+                <Image source={cat.icon} style={s.miniCatPillIconImg} resizeMode="contain" />
+              </View>
+              <Text style={s.miniCatPillLabel} numberOfLines={1}>{cat.label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </SafeAreaView>
+    </Animated.View>
+  );
+}
+
 // ─── Tela Principal ────────────────────────────────────────────────────────────
 export default function Home() {
   const router = useRouter();
   const { produtos, loading } = useProdutos();
-  const { onScroll, resetHeader } = useScrollHandler();
+  const { onScroll, resetHeader, scrollY } = useScrollHandler();
   const headerHeight = useHeaderHeight();
+  const headerHidden = useHeaderHidden();
   const scrollRef = useRef(null);
+  const [categoriasBottomY, setCategoriasBottomY] = useState(null);
+
+  // Espaço reservado pro header no topo do conteúdo — agora é FIXO (sempre
+  // igual à altura real do header), não anima mais nem encolhe/cresce. O
+  // header virou puro overlay, exatamente igual a barra de categorias: ele
+  // desliza por cima/some, mas nunca empurra o resto do conteúdo.
+  const headerSpacerHeight = headerHeight;
 
   useFocusEffect(
     useCallback(() => {
@@ -245,91 +378,36 @@ export default function Home() {
         ref={scrollRef}
         style={s.scroll}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: SPACING[10], paddingTop: headerHeight }}
+        contentContainerStyle={{ paddingBottom: SPACING[10] }}
         onScroll={onScroll}
         scrollEventThrottle={16}
       >
+        {/* Espaço reservado pro header — fixo, não empurra mais nada */}
+        <View style={{ height: headerSpacerHeight }} />
 
-        {/* ══════════════════ HERO ══════════════════ */}
-        <ImageBackground
-          source={{ uri: 'https://eucwoxjmjfqylyrqunwk.supabase.co/storage/v1/object/public/logo/banner.png' }}
-          style={s.heroBg}
-          imageStyle={{ resizeMode: 'cover' }}
+        {/* ══════════════════ CATEGORIAS (estilo iFood, grid 2x2) ══════════════════ */}
+        <View
+          style={[s.section, { paddingTop: SPACING[4] }]}
+          onLayout={(e) => setCategoriasBottomY(e.nativeEvent.layout.y + e.nativeEvent.layout.height)}
         >
-          {/* Overlay escuro */}
-          <View style={s.heroOverlay} />
-
-          <View style={s.hero}>
-            {/* Status */}
-            <View style={s.heroStatus}>
-              <View style={s.statusDot} />
-              <Text style={[s.statusText, { color: '#86EFAC' }]}>Aberto agora · fecha às 22h</Text>
-            </View>
-
-            {/* Linha principal: título + cards de stats */}
-            <View style={s.heroMain}>
-              <View style={s.heroLeft}>
-                <Text style={[s.heroTitle, { color: '#FFFFFF' }]}>A batata{"\n"}que você{"\n"}merecia.</Text>
-                <Text style={[s.heroSub, { color: 'rgba(255,255,255,0.75)' }]}>Recheios generosos{"\n"}até 22 min na sua porta</Text>
-              </View>
-              <View style={s.heroRight}>
-                <View style={[s.heroStatCard, { backgroundColor: 'rgba(0,0,0,0.45)', borderColor: 'rgba(255,255,255,0.15)' }]}>
-                  <Text style={[s.heroStatNum, { color: '#FFF' }]}>35+</Text>
-                  <Text style={[s.heroStatLabel, { color: 'rgba(255,255,255,0.6)' }]}>pedidos{"\n"}hoje</Text>
-                </View>
-                <View style={[s.heroStatCard, { backgroundColor: COLORS.primary + 'CC', borderColor: COLORS.primary }]}>
-                  <Ionicons name="star" size={14} color="#1A1A1A" />
-                  <Text style={[s.heroStatNum, { color: '#1A1A1A' }]}>4.9</Text>
-                  <Text style={[s.heroStatLabel, { color: 'rgba(0,0,0,0.6)' }]}>avaliação</Text>
-                </View>
-              </View>
-            </View>
-
-            {/* Chips de info */}
-            <View style={s.heroChips}>
-              <View style={[s.chip, { backgroundColor: 'rgba(0,0,0,0.4)', borderColor: 'rgba(255,255,255,0.2)' }]}>
-                <Ionicons name="bicycle-outline" size={13} color={COLORS.primary} />
-                <Text style={[s.chipText, { color: '#FFF' }]}>Frete grátis</Text>
-              </View>
-              <View style={[s.chip, { backgroundColor: 'rgba(0,0,0,0.4)', borderColor: 'rgba(255,255,255,0.2)' }]}>
-                <Ionicons name="time-outline" size={13} color={COLORS.primary} />
-                <Text style={[s.chipText, { color: '#FFF' }]}>15–22 min</Text>
-              </View>
-            </View>
-          </View>
-        </ImageBackground>
-
-        {/* CTA fora da imagem */}
-        <View style={s.heroCtaWrap}>
-          <Pressable style={s.heroCta} onPress={() => router.push('/cardapio')}>
-            <Text style={s.heroCtaText}>Ver Cardápio</Text>
-            <Ionicons name="arrow-forward" size={16} color="#1A1A1A" />
-          </Pressable>
-        </View>
-
-        {/* ══════════════════ CATEGORIAS ══════════════════ */}
-        <View style={s.section}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={s.catRow}
-          >
-            {[
-              { label: 'Batatas',   icon: 'flame-outline',     cat: 'Batatas'  },
-              { label: 'Macarrão', icon: 'restaurant-outline', cat: 'Macarrão' },
-              { label: 'Bebidas',  icon: 'wine-outline',       cat: 'Bebidas'  },
-              { label: 'Promoções',icon: 'pricetag-outline',   cat: 'Todas'    },
-            ].map((cat) => (
+          <View style={s.catGrid}>
+            {CATEGORIAS.map((cat) => (
               <Pressable
                 key={cat.label}
-                style={s.catPill}
-                onPress={() => router.push({ pathname: '/cardapio', params: { categoria: cat.cat } })}
+                style={s.catGridItem}
+                onPress={() =>
+                  cat.route
+                    ? router.push(cat.route)
+                    : router.push({ pathname: '/cardapio', params: { categoria: cat.cat } })
+                }
               >
-                <Ionicons name={cat.icon} size={15} color="#EA580C" />
-                <Text style={s.catPillText}>{cat.label}</Text>
+                <View style={s.catGridBox}>
+                  <Image source={cat.icon} style={s.catGridIcon} resizeMode="contain" />
+                </View>
+                <Text style={s.catGridLabel} numberOfLines={1}>{cat.label}</Text>
               </Pressable>
             ))}
-          </ScrollView>
+          </View>
         </View>
 
         {/* ══════════════════ DESTAQUES (scroll horizontal) ══════════════════ */}
@@ -427,6 +505,13 @@ export default function Home() {
         </View>
 
       </ScrollView>
+
+      <CategoriasFlutuantes
+        scrollY={scrollY}
+        categoriasBottomY={categoriasBottomY}
+        headerHidden={headerHidden}
+        router={router}
+      />
     </View>
   );
 }
@@ -436,145 +521,7 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   scroll: { flex: 1 },
 
-  // ── HERO COM FUNDO ────────────────────────────────────────────────────────
-  heroBg: {
-    width: '100%',
-    height: 250,
-  },
-  heroOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.50)',
-  },
-  hero: {
-    paddingHorizontal: SPACING[6],
-    paddingTop: SPACING[6],
-    paddingBottom: SPACING[6],
-    gap: SPACING[3],
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  heroCtaWrap: {
-    paddingHorizontal: SPACING[6],
-    paddingTop: SPACING[4],
-    paddingBottom: SPACING[2],
-    backgroundColor: COLORS.background,
-  },
-  heroStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: '#22C55E',
-    shadowColor: '#22C55E',
-    shadowOpacity: 0.7,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  statusText: {
-    color: '#22C55E',
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.2,
-  },
-  // Layout duas colunas
-  heroMain: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: SPACING[3],
-  },
-  heroLeft: {
-    flex: 1,
-    gap: SPACING[2],
-  },
-  heroTitle: {
-    color: COLORS.text,
-    fontWeight: '800',
-    fontSize: 36,
-    lineHeight: 42,
-    letterSpacing: -1,
-  },
-  heroSub: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  heroRight: {
-    gap: SPACING[2],
-    alignItems: 'center',
-  },
-  heroStatCard: {
-    width: 72,
-    backgroundColor: COLORS.backgroundCard,
-    borderRadius: RADIUS.lg,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: SPACING[3],
-    alignItems: 'center',
-    gap: 2,
-  },
-  heroStatCardAlt: {
-    borderColor: COLORS.primary + '40',
-    backgroundColor: COLORS.primary + '10',
-  },
-  heroStatNum: {
-    color: COLORS.text,
-    fontWeight: '800',
-    fontSize: 18,
-    lineHeight: 22,
-  },
-  heroStatLabel: {
-    color: COLORS.textMuted,
-    fontSize: 9,
-    textAlign: 'center',
-    lineHeight: 12,
-    fontWeight: '600',
-  },
 
-  // Chips de info
-  heroChips: {
-    flexDirection: 'row',
-    gap: SPACING[2],
-  },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: COLORS.backgroundCard,
-    borderRadius: RADIUS.full ?? 999,
-    paddingHorizontal: SPACING[3],
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  chipText: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-
-  // CTA
-  heroCta: {
-    backgroundColor: COLORS.primary,
-    borderRadius: RADIUS.lg,
-    paddingVertical: SPACING[4],
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING[2],
-    marginTop: SPACING[2],
-    ...SHADOWS.glow,
-  },
-  heroCtaText: {
-    color: COLORS.background,
-    fontWeight: '800',
-    fontSize: TYPOGRAPHY.sizes.base,
-    letterSpacing: 0.2,
-  },
 
   // ── SECTION BASE ─────────────────────────────────────────────────────────
   section: {
@@ -604,32 +551,99 @@ const s = StyleSheet.create({
     fontSize: TYPOGRAPHY.sizes.sm,
   },
 
-  // ── CATEGORIAS ────────────────────────────────────────────────────────────
-  catRow: {
+  // ── CATEGORIAS (grid 2x2, estilo iFood — sem sombra/borda) ─────────────────
+  catGrid: {
     paddingHorizontal: SPACING[6],
-    gap: SPACING[2],
-    paddingVertical: 2,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: SPACING[4],
   },
-  catPill: {
+  catGridItem: {
+    width: '48%',
+    alignItems: 'center',
+  },
+  catGridBox: {
+    width: '100%',
+    aspectRatio: 2.3, // era 1.88 — bem mais achatado, menos altura vertical
+    borderRadius: RADIUS.xl,
+    backgroundColor: COLORS.backgroundElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACING[2],
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
+  },
+  catGridIcon: {
+    width: '62%',
+    height: '62%',
+  },
+  catGridLabel: {
+    color: COLORS.text,
+    fontWeight: '700',
+    fontSize: TYPOGRAPHY.sizes.sm,
+    textAlign: 'center',
+  },
+
+  // ── BARRA FLUTUANTE DE CATEGORIAS (aparece ao sair da grid, estilo pill) ───
+  miniCatWrap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 950,
+    backgroundColor: COLORS.background,
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
+  },
+  miniCatRow: {
+    flexDirection: 'row',
+    paddingHorizontal: SPACING[6],
+    paddingVertical: SPACING[3],
+    gap: SPACING[2],
+  },
+  miniCatPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
+    backgroundColor: COLORS.backgroundElevated,
+    borderRadius: RADIUS.full ?? 999,
+    paddingLeft: SPACING[1],
+    paddingRight: SPACING[4],
+    paddingVertical: SPACING[1],
+    gap: SPACING[2],
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
   },
-  catPillText: {
-    fontSize: 12,
+  miniCatPillIcon: {
+    width: 48,
+    height: 35,
+    borderRadius: 24,
+    backgroundColor: COLORS.backgroundElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
+  },
+  miniCatPillIconImg: {
+    width: '76%',
+    height: '76%',
+  },
+  miniCatPillLabel: {
+    color: COLORS.text,
     fontWeight: '700',
-    color: '#1A1A1A',
+    fontSize: TYPOGRAPHY.sizes.sm,
   },
 
   // ── MINI CAROUSEL (Em alta) ───────────────────────────────────────────────

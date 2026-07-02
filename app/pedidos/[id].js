@@ -8,18 +8,23 @@ import {
   Linking,
   Image,
   Alert,
+  Modal,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 import { usePedidos } from '../hooks/usePedidos';
 import { useHeaderHeight, useScrollHandler } from '../_layout';
+import { supabase } from '../../supabaseConfig';
+import { checkPixStatus } from '../../utils/mercadoPago';
+import HelpModal from '../../components/HelpModal';
 
 // ─── Constantes de status ─────────────────────────────────────────────────────
 
 const STATUS_LABELS = {
+  awaiting_payment: 'Aguardando pagamento',
   pending: 'Aguardando confirmação',
   preparing: 'Em preparo',
   ready: 'Pronto para entrega',
@@ -28,6 +33,7 @@ const STATUS_LABELS = {
 };
 
 const STATUS_ICONS = {
+  awaiting_payment: 'qr-code-outline',
   pending: 'time-outline',
   preparing: 'flame-outline',
   ready: 'checkmark-circle-outline',
@@ -36,6 +42,7 @@ const STATUS_ICONS = {
 };
 
 const STATUS_COLORS = {
+  awaiting_payment: '#7C3AED',
   pending: '#D97706',
   preparing: '#EA580C',
   ready: '#2563EB',
@@ -44,6 +51,7 @@ const STATUS_COLORS = {
 };
 
 const STATUS_BG = {
+  awaiting_payment: '#F5F3FF',
   pending: '#FEF3C7',
   preparing: '#FFF7ED',
   ready: '#EFF6FF',
@@ -59,7 +67,7 @@ const PAYMENT_LABELS = {
 };
 
 const getStatusStep = (status) => {
-  const map = { pending: 1, preparing: 2, ready: 3, delivered: 4, cancelled: 0 };
+  const map = { awaiting_payment: 0, pending: 1, preparing: 2, ready: 3, delivered: 4, cancelled: 0 };
   return map[status] ?? 1;
 };
 
@@ -67,7 +75,7 @@ const getStatusStep = (status) => {
 
 function ProgressBar({ status }) {
   const step = getStatusStep(status);
-  if (status === 'cancelled') return null;
+  if (status === 'cancelled' || status === 'awaiting_payment') return null;
 
   const steps = ['Confirmado', 'Preparo', 'Pronto', 'Entregue'];
   const progressPercent = ((step - 1) / 3) * 100;
@@ -113,6 +121,9 @@ export default function DetalhesPedido() {
   const [pedido, setPedido] = useState(null);
   const [erro, setErro] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [helpModalVisible, setHelpModalVisible] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -128,6 +139,70 @@ export default function DetalhesPedido() {
 
     carregar();
   }, [id]);
+
+  // ── Polling: enquanto aguarda pagamento PIX, checa a cada 5s se já caiu ────
+  // Quando confirmado, atualiza o status no Supabase e recarrega o pedido —
+  // isso tira o pedido da categoria "A Pagar" automaticamente.
+  useEffect(() => {
+    if (!pedido || pedido.status !== 'awaiting_payment') return;
+    const mpOrderId = pedido.metadata?.pix?.order_id;
+    if (!mpOrderId) return;
+
+    const interval = setInterval(async () => {
+      const result = await checkPixStatus(mpOrderId);
+      if (!result.success) return;
+
+      const isPaid =
+        result.statusDetail === 'accredited' ||
+        result.paymentStatus === 'approved' ||
+        result.status === 'processed';
+
+      if (isPaid) {
+        clearInterval(interval);
+        await supabase
+          .from('orders')
+          .update({ status: 'pending', updated_at: new Date().toISOString() })
+          .eq('id', pedido.id);
+
+        const resultado = await buscarPedidoPorId(id);
+        if (resultado.success) setPedido(resultado.data);
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [pedido?.id, pedido?.status]);
+
+  const handleCancelOrder = () => {
+    if (!pedido) return;
+    setShowCancelModal(true);
+  };
+
+  const confirmCancelOrder = async () => {
+    if (!pedido) return;
+    const numLocal = pedido.orderNumber || pedido.id.slice(-4).toUpperCase();
+    setShowCancelModal(false);
+    setCancelling(true);
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+        .eq('id', pedido.id);
+
+      if (error) throw error;
+
+      const resultado = await buscarPedidoPorId(id);
+      if (resultado.success) setPedido(resultado.data);
+
+      const msg = encodeURIComponent(
+        `Olá, gostaria de cancelar meu pedido #${numLocal}.\n\n*Detalhes do Pedido:*\nCliente: ${pedido.customerName}\nTotal: R$ ${pedido.total.toFixed(2).replace('.', ',')}`
+      );
+      Linking.openURL(`https://wa.me/5514997361015?text=${msg}`);
+    } catch (err) {
+      Alert.alert('Erro', 'Não foi possível cancelar o pedido. Entre em contato pelo WhatsApp.');
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   const handleWhatsApp = () => {
     if (!pedido) return;
@@ -220,7 +295,7 @@ export default function DetalhesPedido() {
         </View>
 
         {/* Mercado Pago Payment Card */}
-        {pedido.status === 'pending' && (pedido.paymentMethod === 'pix' || pedido.paymentMethod?.toLowerCase() === 'pix') && pedido.metadata?.pix && (
+        {pedido.status === 'awaiting_payment' && (pedido.paymentMethod === 'pix' || pedido.paymentMethod?.toLowerCase() === 'pix') && pedido.metadata?.pix && (
           <View style={[s.card, s.paymentBox]}>
             <View style={s.sectionHeader}>
               <Ionicons name="qr-code-outline" size={18} color="#EA580C" />
@@ -255,6 +330,26 @@ export default function DetalhesPedido() {
             >
               <Ionicons name={copied ? "checkmark-circle" : "copy-outline"} size={18} color="#FFF" />
               <Text style={s.copyBtnText}>{copied ? "Código Copiado!" : "Copiar Código PIX"}</Text>
+            </Pressable>
+
+            <View style={s.awaitingRow}>
+              <ActivityIndicator size="small" color="#7C3AED" />
+              <Text style={s.awaitingText}>Confirmando automaticamente após o pagamento...</Text>
+            </View>
+
+            <Pressable
+              style={[s.cancelPixBtn, cancelling && { opacity: 0.6 }]}
+              onPress={handleCancelOrder}
+              disabled={cancelling}
+            >
+              {cancelling ? (
+                <ActivityIndicator size={14} color="#DC2626" />
+              ) : (
+                <>
+                  <Ionicons name="close-circle-outline" size={16} color="#DC2626" />
+                  <Text style={s.cancelPixBtnText}>Cancelar Pedido</Text>
+                </>
+              )}
             </Pressable>
           </View>
         )}
@@ -362,11 +457,58 @@ export default function DetalhesPedido() {
         )}
 
         {/* Botão de ajuda */}
-        <Pressable style={s.helpBtn} onPress={handleWhatsApp}>
-          <Ionicons name="logo-whatsapp" size={20} color="#FFF" />
+        <Pressable style={s.helpBtn} onPress={() => setHelpModalVisible(true)}>
+          <Ionicons name="help-circle" size={20} color="#FFF" />
           <Text style={s.helpBtnText}>Preciso de Ajuda</Text>
         </Pressable>
       </ScrollView>
+
+      {/* Modal de confirmação de cancelamento — substitui o Alert.alert
+          nativo (feio, fora do tema) por algo no estilo do app. */}
+      <Modal
+        visible={showCancelModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowCancelModal(false)}
+      >
+        <View style={s.cancelBackdrop}>
+          <View style={s.cancelCard}>
+            <View style={s.cancelIconWrap}>
+              <Ionicons name="alert-circle" size={40} color="#DC2626" />
+            </View>
+            <Text style={s.cancelTitle}>Cancelar pedido</Text>
+            <Text style={s.cancelSubtitle}>
+              Tem certeza que deseja cancelar o pedido{' '}
+              <Text style={s.cancelSubtitleBold}>
+                #{pedido?.orderNumber || pedido?.id?.slice(-4).toUpperCase()}
+              </Text>
+              ? Essa ação não pode ser desfeita.
+            </Text>
+
+            <View style={s.cancelActions}>
+              <Pressable
+                style={s.cancelBtnGhost}
+                onPress={() => setShowCancelModal(false)}
+              >
+                <Text style={s.cancelBtnGhostText}>Voltar</Text>
+              </Pressable>
+              <Pressable
+                style={s.cancelBtnDanger}
+                onPress={confirmCancelOrder}
+              >
+                <Ionicons name="close-circle-outline" size={16} color="#FFF" />
+                <Text style={s.cancelBtnDangerText}>Cancelar Pedido</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <HelpModal
+        visible={helpModalVisible}
+        onClose={() => setHelpModalVisible(false)}
+        onContactSupport={handleWhatsApp}
+      />
     </View>
   );
 }
@@ -374,6 +516,81 @@ export default function DetalhesPedido() {
 // ─── Estilos ──────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
+  cancelBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  cancelCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: COLORS.white ?? '#FFF',
+    borderRadius: RADIUS.xl ?? 20,
+    padding: 24,
+    alignItems: 'center',
+    ...(SHADOWS?.lg ?? SHADOWS?.md ?? {}),
+  },
+  cancelIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#FEF2F2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  cancelTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.text ?? '#111',
+    marginBottom: 8,
+  },
+  cancelSubtitle: {
+    fontSize: 13.5,
+    color: COLORS.textSecondary ?? '#666',
+    textAlign: 'center',
+    lineHeight: 19,
+    marginBottom: 22,
+  },
+  cancelSubtitleBold: {
+    fontWeight: '800',
+    color: COLORS.text ?? '#111',
+  },
+  cancelActions: {
+    flexDirection: 'row',
+    gap: 10,
+    width: '100%',
+  },
+  cancelBtnGhost: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: RADIUS.lg ?? 12,
+    backgroundColor: COLORS.borderLight ?? '#F0F0F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelBtnGhostText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.textSecondary ?? '#555',
+  },
+  cancelBtnDanger: {
+    flex: 1.3,
+    flexDirection: 'row',
+    gap: 6,
+    paddingVertical: 13,
+    borderRadius: RADIUS.lg ?? 12,
+    backgroundColor: '#DC2626',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelBtnDangerText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFF',
+  },
   container: {
     flex: 1,
     backgroundColor: COLORS.backgroundElevated ?? '#F5F5F5',
@@ -606,7 +823,7 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: SPACING[2] ?? 8,
-    backgroundColor: '#25D366',
+    backgroundColor: COLORS.primary ?? '#FFB800',
     paddingVertical: SPACING[4] ?? 16,
     borderRadius: RADIUS.xl ?? 16,
     ...(SHADOWS?.md ?? {}),
@@ -678,6 +895,33 @@ const s = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '800',
     fontSize: 14,
+  },
+  awaitingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 14,
+  },
+  awaitingText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#7C3AED',
+  },
+  cancelPixBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingVertical: 10,
+    borderRadius: RADIUS.lg ?? 12,
+    backgroundColor: '#FEF2F2',
+  },
+  cancelPixBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#DC2626',
   },
   payOnlineBtn: {
     backgroundColor: '#27AE60',

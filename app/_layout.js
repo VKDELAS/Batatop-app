@@ -1,15 +1,19 @@
 import { Stack, useRouter, usePathname } from 'expo-router';
 import {
   View, Text, StatusBar, StyleSheet, Pressable,
-  ScrollView, Animated, Image,
+  ScrollView, Animated, Image, Easing,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useState, useRef, useEffect, createContext, useContext } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, createContext, useContext } from 'react';
 
 import { useCart } from '../utils/cartStore';
 import { supabase } from '../supabaseConfig';
 import { configureNotificationAudio } from '../utils/notificationSound';
+import AdminPushRegistration from '../components/AdminPushRegistration';
+import EntrarBanner from '../components/EntrarBanner';
+import AuthBottomSheet from '../components/AuthBottomSheet';
+import AnimatedSplash from '../components/AnimatedSplash';
 
 /* ============================================================
    CONTEXTO DE DIREÇÃO DE NAVEGAÇÃO
@@ -43,7 +47,7 @@ export const useScrollHandler = () => {
     const y = event?.nativeEvent?.contentOffset?.y ?? 0;
     scrollY.setValue(y);
   };
-  return { onScroll, resetHeader };
+  return { onScroll, resetHeader, scrollY };
 };
 
 /* ============================================================
@@ -55,6 +59,46 @@ export const useScrollHandler = () => {
 const HeaderHeightContext = createContext(175); // fallback seguro
 
 export const useHeaderHeight = () => useContext(HeaderHeightContext);
+
+/* ============================================================
+   HEADER ANIM CONTEXT
+   Compartilha DOIS Animated.Value sincronizados:
+   - headerAnim: dirigido pelo native driver, usado no próprio header
+     (translateY/opacity — propriedades suportadas pelo native driver).
+   - headerSpacerAnim: dirigido pela JS thread (sem native driver), usado
+     pelas telas para animar a ALTURA do espaço reservado no topo — 'height'
+     não é suportado pelo native driver, por isso precisa de um Value à parte.
+   Os dois são sempre animados juntos (Animated.parallel) com a mesma
+   duração/curva, então ficam sincronizados visualmente.
+   ============================================================ */
+const HeaderAnimContext = createContext({
+  headerAnim: new Animated.Value(0),
+  // Legado: não é mais usado pra animar nada (ficava travado em pixels, JS thread).
+  // Mantido só pra não quebrar import de tela antiga que ainda referencie isso.
+  headerSpacerAnim: new Animated.Value(0),
+});
+
+export const useHeaderAnim = () => useContext(HeaderAnimContext).headerAnim;
+export const useHeaderSpacerAnim = () => useContext(HeaderAnimContext).headerSpacerAnim;
+
+/* ============================================================
+   CONSTANTES DE ANIMAÇÃO DO HEADER
+   Únicas, no escopo do módulo — o Header e a barra flutuante de categorias
+   (lá no index.js) usam EXATAMENTE essas mesmas constantes. Isso garante que
+   os dois se mexem juntos, no mesmo ritmo, nunca mais rápido/devagar um que
+   o outro.
+   ============================================================ */
+export const HEADER_SHOW_THRESHOLD = 90;
+export const HEADER_HYSTERESIS = 24;
+export const HEADER_ANIM_DURATION = 650;
+export const HEADER_EASING = Easing.out(Easing.cubic); // desacelera no final, fica mais orgânico
+
+const HeaderHiddenContext = createContext({
+  headerHidden: false,
+  setHeaderHidden: () => {},
+});
+
+export const useHeaderHidden = () => useContext(HeaderHiddenContext).headerHidden;
 
 /* ============================================================
    DRAWER MENU LATERAL
@@ -219,18 +263,56 @@ const sd = StyleSheet.create({
 /* ============================================================
    HEADER GLOBAL COM HIDE/SHOW NO SCROLL
    ============================================================ */
+function getGreeting() {
+  const h = new Date().getHours();
+  if (h >= 5 && h < 12) return 'Bom dia';
+  if (h >= 12 && h < 18) return 'Boa tarde';
+  return 'Boa noite';
+}
+
+// Pega só o primeiro nome e capitaliza certinho (ex: "joão pedro" -> "João")
+function getFirstName(fullName) {
+  if (!fullName) return null;
+  const first = fullName.trim().split(/\s+/)[0];
+  if (!first) return null;
+  return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+}
+
 function Header({ onHeightChange, onRegisterReset }) {
-  const [selectedAddress, setSelectedAddress] = useState('Selecione um endereço');
+  const [selectedAddress, setSelectedAddress] = useState('Selecione seu endereço');
   const [drawerVisible, setDrawerVisible]     = useState(false);
   const [user, setUser]                       = useState(null);
   const [authResolved, setAuthResolved]       = useState(false);
+  const [timeGreeting]                        = useState(getGreeting());
+  const [storeOpen, setStoreOpen]             = useState(true);
+
+  // Nome só aparece se tiver usuário logado com full_name no metadata.
+  const firstName = user ? getFirstName(user.user_metadata?.full_name) : null;
+  const greeting = firstName ? `${timeGreeting}, ${firstName}` : timeGreeting;
 
   const scaleAnim        = useRef(new Animated.Value(1)).current;
-  const headerTranslateY = useRef(new Animated.Value(0)).current;
   const authRowOpacity   = useRef(new Animated.Value(1)).current;
   const authRowTranslateY = useRef(new Animated.Value(0)).current;
   const [authRowVisible, setAuthRowVisible] = useState(true);
   const addressNavLock = useRef(false);
+
+  /* ---- Animação de entrada + crossfade do endereço (estilo iFood) ---- */
+  const greetingOpacity    = useRef(new Animated.Value(0)).current;
+  const greetingTranslateY = useRef(new Animated.Value(8)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(greetingOpacity,    { toValue: 1, duration: 380, useNativeDriver: true }),
+      Animated.timing(greetingTranslateY, { toValue: 0, duration: 380, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  const animateAddressChange = (text) => {
+    Animated.timing(greetingOpacity, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => {
+      setSelectedAddress(text);
+      Animated.timing(greetingOpacity, { toValue: 1, duration: 220, useNativeDriver: true }).start();
+    });
+  };
 
   const router   = useRouter();
   const pathname = usePathname();
@@ -238,8 +320,97 @@ function Header({ onHeightChange, onRegisterReset }) {
   const { setAnimation, setLastRoute } = useNavContext();
   const { scrollY } = useContext(ScrollYContext);
 
-  const prevScrollY  = useRef(0);
-  const headerVisible = useRef(true);
+  // Threshold: em vez de um número mágico fixo, usa a ALTURA REAL do header
+  // (medida via onLayout). Assim ele some exatamente quando o scroll já
+  // passou da área dele, e só volta quando o scroll reentra nessa área —
+  // antes o limite era um valor fixo (90px) bem menor que a altura real do
+  // header, então ele ficava escondendo/aparecendo fora de hora.
+  const [measuredHeight, setMeasuredHeight] = useState(175);
+  const measuredHeightRef = useRef(measuredHeight);
+  useEffect(() => {
+    measuredHeightRef.current = measuredHeight;
+  }, [measuredHeight]);
+
+  const { headerAnim } = useContext(HeaderAnimContext);
+  const { setHeaderHidden } = useContext(HeaderHiddenContext);
+  const headerHiddenRef = useRef(false);
+
+  useEffect(() => {
+    const id = scrollY.addListener(({ value }) => {
+      const hiddenNow = headerHiddenRef.current;
+      let shouldHide = hiddenNow;
+      const hideAt = measuredHeightRef.current;
+
+      if (!hiddenNow && value > hideAt + HEADER_HYSTERESIS) {
+        shouldHide = true;
+      } else if (hiddenNow && value < hideAt - HEADER_HYSTERESIS) {
+        shouldHide = false;
+      }
+
+      if (shouldHide !== hiddenNow) {
+        headerHiddenRef.current = shouldHide;
+        // O header desliza/some via native driver (translateY + opacity).
+        // setHeaderHidden só avisa a barra de categorias que o header já
+        // terminou de sumir/aparecer — não empurra mais nada na tela.
+        Animated.timing(headerAnim, {
+          toValue: shouldHide ? 1 : 0,
+          duration: HEADER_ANIM_DURATION,
+          easing: HEADER_EASING,
+          useNativeDriver: true,
+        }).start();
+        setHeaderHidden(shouldHide);
+      }
+    });
+    return () => scrollY.removeListener(id);
+  }, []);
+
+  const headerTranslateY = headerAnim.interpolate({
+    inputRange: [0, 1],
+    // Sai completamente da tela usando a altura REAL medida (+ folga), em
+    // vez de um -160 fixo — se o header for mais alto que isso, sobrava uma
+    // tirinha visível mesmo "escondido", parecendo que ele "ainda tá lá".
+    outputRange: [0, -(measuredHeight + 40)],
+  });
+
+  const headerOpacity = headerAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0],
+  });
+
+  /* ---- Status da loja (aberto/fechado) — tabela store_settings ---- */
+  useEffect(() => {
+    let channel;
+
+    async function fetchStoreStatus() {
+      const { data } = await supabase
+        .from('store_settings')
+        .select('setting_value')
+        .eq('setting_key', 'store_status')
+        .single();
+      if (data?.setting_value?.isOpen !== undefined) {
+        setStoreOpen(!!data.setting_value.isOpen);
+      }
+    }
+
+    fetchStoreStatus();
+
+    channel = supabase
+      .channel('store_status_header')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'store_settings', filter: 'setting_key=eq.store_status' },
+        (payload) => {
+          if (payload.new?.setting_value?.isOpen !== undefined) {
+            setStoreOpen(!!payload.new.setting_value.isOpen);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, []);
 
   /* ---- Auth & endereço ---- */
   useEffect(() => {
@@ -260,7 +431,7 @@ function Header({ onHeightChange, onRegisterReset }) {
           Animated.timing(authRowTranslateY,  { toValue: -12, duration: 220, useNativeDriver: true }),
         ]).start(() => setAuthRowVisible(false));
       } else {
-        setSelectedAddress('Selecione um endereço');
+        animateAddressChange('Selecione seu endereço');
         authRowTranslateY.setValue(-12);
         setAuthRowVisible(true);
         Animated.parallel([
@@ -282,7 +453,7 @@ function Header({ onHeightChange, onRegisterReset }) {
         .eq('is_default', true)
         .single();
       if (data) {
-        setSelectedAddress(`${data.street}, ${data.number}`);
+        animateAddressChange(`${data.street}, ${data.number}`);
         return;
       }
       // fallback: mais recente
@@ -293,36 +464,20 @@ function Header({ onHeightChange, onRegisterReset }) {
         .order('created_at', { ascending: false })
         .limit(1)
         .single();
-      if (any) setSelectedAddress(`${any.street}, ${any.number}`);
+      if (any) animateAddressChange(`${any.street}, ${any.number}`);
     } catch { /* sem endereço ainda */ }
   }
 
-  /* ---- Hide/show no scroll ---- */
-  const showHeader = () => {
-    if (!headerVisible.current) {
-      headerVisible.current = true;
-      Animated.spring(headerTranslateY, { toValue: 0, useNativeDriver: true, tension: 80, friction: 12 }).start();
-    }
-  };
-
+  /* ---- Reset do header ao focar uma tela (chamado pelo useFocusEffect de cada tela) ----
+     Como o headerTranslateY/headerOpacity agora são interpolações diretas do
+     scrollY compartilhado, resetar é só zerar o valor do scroll. */
   useEffect(() => {
-    if (typeof onRegisterReset === 'function') onRegisterReset(showHeader);
-  }, []);
-
-  useEffect(() => {
-    const id = scrollY.addListener(({ value }) => {
-      const delta = value - prevScrollY.current;
-      prevScrollY.current = value;
-      if (value <= 10) {
-        showHeader();
-      } else if (delta > 6 && headerVisible.current) {
-        headerVisible.current = false;
-        Animated.timing(headerTranslateY, { toValue: -160, duration: 220, useNativeDriver: true }).start();
-      } else if (delta < -6 && !headerVisible.current) {
-        showHeader();
-      }
+    if (typeof onRegisterReset === 'function') onRegisterReset(() => {
+      scrollY.setValue(0);
+      headerHiddenRef.current = false;
+      headerAnim.setValue(0);
+      setHeaderHidden(false); // reset instantâneo ao trocar de tela
     });
-    return () => scrollY.removeListener(id);
   }, []);
 
   /* ---- authRow em /addresses ---- */
@@ -355,48 +510,59 @@ function Header({ onHeightChange, onRegisterReset }) {
       <Animated.View
         style={[
           s.headerSafeAnimated,
-          { transform: [{ translateY: headerTranslateY }], position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1000 },
+          {
+            transform: [{ translateY: headerTranslateY }],
+            opacity: headerOpacity,
+            position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1000,
+          },
         ]}
-        onLayout={(e) => onHeightChange && onHeightChange(e.nativeEvent.layout.height)}
+        onLayout={(e) => {
+          const h = e.nativeEvent.layout.height;
+          setMeasuredHeight(h);
+          onHeightChange && onHeightChange(h);
+        }}
       >
         <SafeAreaView style={s.headerSafe} edges={['top']}>
-          {/* ── Linha 1: hambúrguer + endereço + carrinho ── */}
+          {/* ── Linha 1: hambúrguer + saudação/endereço + carrinho (estilo iFood) ── */}
           <View style={s.addressRow}>
-            <Pressable style={s.menuBtn} onPress={() => setDrawerVisible(true)}>
-              <View style={s.menuBar} />
-              <View style={[s.menuBar, { width: 16 }]} />
-              <View style={s.menuBar} />
+            <Pressable
+              style={s.greetingAddressWrap}
+              onPress={() => {
+                if (addressNavLock.current || isAddressPage) return;
+                addressNavLock.current = true;
+                setLastRoute(pathname);
+                setAnimation('slide_from_right');
+                router.replace('/addresses');
+                setTimeout(() => { addressNavLock.current = false; }, 600);
+              }}
+              onPressIn={() => Animated.spring(scaleAnim, { toValue: 0.98, useNativeDriver: true }).start()}
+              onPressOut={() => Animated.spring(scaleAnim, { toValue: 1,    useNativeDriver: true }).start()}
+            >
+              <Animated.View
+                style={{
+                  opacity: greetingOpacity,
+                  transform: [{ translateY: greetingTranslateY }, { scale: scaleAnim }],
+                }}
+              >
+                <Text style={s.greetingText}>{greeting}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Text style={s.addressValueText} numberOfLines={1}>
+                    {selectedAddress}
+                  </Text>
+                  <Ionicons name="chevron-down" size={15} color="#1A1A1A" />
+                </View>
+              </Animated.View>
             </Pressable>
 
-            <Animated.View style={[s.addressSelectorInline, { transform: [{ scale: scaleAnim }] }]}>
-              <Pressable
-                style={s.addressSelectorInnerRow}
-                onPress={() => {
-                  if (addressNavLock.current || isAddressPage) return;
-                  addressNavLock.current = true;
-                  setLastRoute(pathname);
-                  setAnimation('slide_from_right');
-                  router.replace('/addresses');
-                  setTimeout(() => { addressNavLock.current = false; }, 600);
-                }}
-                onPressIn={() => Animated.spring(scaleAnim, { toValue: 0.98, useNativeDriver: true }).start()}
-                onPressOut={() => Animated.spring(scaleAnim, { toValue: 1,    useNativeDriver: true }).start()}
-              >
-                <Ionicons name="location-sharp" size={18} color="#FFB800" />
-                <View style={s.addressSelectorTextInline}>
-                  <Text style={s.addressSelectorLabelInline}>Entregando em</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    <Text style={s.addressSelectorValueInline} numberOfLines={1}>
-                      {selectedAddress}
-                    </Text>
-                    <Ionicons name="chevron-down" size={14} color="#1A1A1A" />
-                  </View>
-                </View>
-              </Pressable>
-            </Animated.View>
+            <View style={s.storeStatusWrap}>
+              <View style={[s.storeStatusDot, { backgroundColor: storeOpen ? '#22C55E' : '#E63535' }]} />
+              <Text style={s.storeStatusText}>{storeOpen ? 'Aberto' : 'Fechado'}</Text>
+            </View>
 
-            <Pressable style={s.cartBtn} onPress={() => router.push('/cart')}>
-              <Ionicons name="cart-outline" size={28} color="#1A1A1A" />
+            <Pressable style={s.cartCircleBtn} onPress={() => router.push('/cart')}>
+              <View style={s.cartCircleInner}>
+                <Ionicons name="cart-outline" size={20} color="#1A1A1A" />
+              </View>
               {totalItems > 0 && (
                 <View style={s.cartBadge}>
                   <Text style={s.cartBadgeText}>{totalItems}</Text>
@@ -404,18 +570,6 @@ function Header({ onHeightChange, onRegisterReset }) {
               )}
             </Pressable>
           </View>
-
-          {/* ── Linha 2: auth — some quando logado ou em /addresses ── */}
-          {authRowVisible && (
-            <Animated.View style={[s.authRow, { opacity: authRowOpacity, transform: [{ translateY: authRowTranslateY }] }]}>
-              <Pressable style={s.registerHeaderBtn} onPress={() => { setAnimation('slide_from_right'); router.push('/auth/register'); }}>
-                <Text style={s.registerHeaderBtnText}>Criar conta</Text>
-              </Pressable>
-              <Pressable style={s.loginBtn} onPress={() => { setAnimation('slide_from_right'); router.push('/auth/login'); }}>
-                <Text style={s.loginBtnText}>Entrar</Text>
-              </Pressable>
-            </Animated.View>
-          )}
         </SafeAreaView>
       </Animated.View>
 
@@ -509,8 +663,12 @@ function BottomTabBar() {
   ];
 
   const isActive = (routeName) => {
-    if (routeName === 'index') return pathname === '/' || pathname === '/index';
-    return pathname.includes(routeName);
+    // Compara o primeiro segmento da rota, não uma busca de texto solto.
+    // Antes: pathname.includes('pedidos') acendia a aba "Pedidos" também
+    // dentro de /admin/pedidos, porque a string "pedidos" aparecia lá dentro.
+    const firstSegment = pathname.split('/').filter(Boolean)[0] || '';
+    if (routeName === 'index') return firstSegment === '';
+    return firstSegment === routeName;
   };
 
   const currentIdx = getTabIndex(pathname);
@@ -547,17 +705,34 @@ function BottomTabBar() {
    ROOT LAYOUT
    ============================================================ */
 const rootScrollY = new Animated.Value(0);
+const rootHeaderAnim = new Animated.Value(0);
+const rootHeaderSpacerAnim = new Animated.Value(0);
+const rootHeaderAnimCtxValue = { headerAnim: rootHeaderAnim, headerSpacerAnim: rootHeaderSpacerAnim };
 
 export default function RootLayout() {
   const [headerHeight, setHeaderHeight] = useState(175);
   const [animation, setAnimation]       = useState('slide_from_right');
   const [lastRoute, setLastRoute]       = useState('/');
+  const [headerHidden, setHeaderHiddenState] = useState(false);
+  const [authSheetVisible, setAuthSheetVisible] = useState(false);
+  const [showSplash, setShowSplash] = useState(true);
   const resetHeaderRef = useRef(() => {});
 
   const scrollCtxValue = useRef({
     scrollY: rootScrollY,
     resetHeader: () => resetHeaderRef.current(),
   }).current;
+
+  // Só um sinalizador booleano agora — nada de altura anima mais com ele.
+  // A barra de categorias usa isso pra saber se o header já sumiu.
+  const setHeaderHidden = useCallback((value) => {
+    setHeaderHiddenState(value);
+  }, []);
+
+  const headerHiddenCtxValue = useMemo(
+    () => ({ headerHidden, setHeaderHidden }),
+    [headerHidden, setHeaderHidden]
+  );
 
   useEffect(() => {
     configureNotificationAudio();
@@ -567,26 +742,46 @@ export default function RootLayout() {
     <NavContext.Provider value={{ animation, setAnimation, lastRoute, setLastRoute }}>
     <ScrollYContext.Provider value={scrollCtxValue}>
     <HeaderHeightContext.Provider value={headerHeight}>
+    <HeaderHiddenContext.Provider value={headerHiddenCtxValue}>
+    <HeaderAnimContext.Provider value={rootHeaderAnimCtxValue}>
     <SafeAreaProvider>
-      <StatusBar backgroundColor="#FFB800" barStyle="dark-content" />
-      <View style={{ flex: 1 }}>
-        <Header
-          onHeightChange={setHeaderHeight}
-          onRegisterReset={(fn) => { resetHeaderRef.current = fn; }}
-        />
-        <View style={{ flex: 1 }}>
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: '#F8F9FA' },
-              animation,
-            }}
-          />
-        </View>
-        <CartBar />
-        <BottomTabBar />
-      </View>
+      <StatusBar
+        backgroundColor={showSplash ? '#FF0000' : (authSheetVisible ? 'transparent' : '#FFFFFF')}
+        translucent={!showSplash && authSheetVisible}
+        barStyle={showSplash || authSheetVisible ? 'light-content' : 'dark-content'}
+      />
+      {showSplash ? (
+        // Enquanto a splash roda, NADA do resto do app é montado.
+        // Isso evita que o carregamento do Header/Stack/Supabase etc.
+        // concorra com a thread de JS e engasgue os primeiros frames do vídeo.
+        <AnimatedSplash onFinish={() => setShowSplash(false)} />
+      ) : (
+        <>
+          <AdminPushRegistration />
+          <View style={{ flex: 1 }}>
+            <Header
+              onHeightChange={setHeaderHeight}
+              onRegisterReset={(fn) => { resetHeaderRef.current = fn; }}
+            />
+            <View style={{ flex: 1 }}>
+              <Stack
+                screenOptions={{
+                  headerShown: false,
+                  contentStyle: { backgroundColor: '#F8F9FA' },
+                  animation,
+                }}
+              />
+            </View>
+            <CartBar />
+            <BottomTabBar />
+            <EntrarBanner onPress={() => setAuthSheetVisible(true)} />
+            <AuthBottomSheet visible={authSheetVisible} onClose={() => setAuthSheetVisible(false)} />
+          </View>
+        </>
+      )}
     </SafeAreaProvider>
+    </HeaderAnimContext.Provider>
+    </HeaderHiddenContext.Provider>
     </HeaderHeightContext.Provider>
     </ScrollYContext.Provider>
     </NavContext.Provider>
@@ -597,17 +792,17 @@ export default function RootLayout() {
    STYLES
    ============================================================ */
 const s = StyleSheet.create({
-  /* ── Header ── */
+  /* ── Header (estilo iFood: fundo branco) ── */
   headerSafeAnimated: { overflow: 'hidden' },
-  headerSafe:         { backgroundColor: '#FFB800' },
+  headerSafe:         { backgroundColor: '#FFFFFF' },
 
   addressRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 8,
-    gap: 8,
+    paddingTop: 12,
+    paddingBottom: 12,
+    gap: 10,
   },
   authRow: {
     flexDirection: 'row',
@@ -623,35 +818,45 @@ const s = StyleSheet.create({
   },
   menuBar: { width: 22, height: 2.5, backgroundColor: '#1A1A1A', borderRadius: 2 },
 
-  addressSelectorInline: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  addressSelectorInnerRow: {
-    flexDirection: 'row', alignItems: 'center',
-    gap: 8, paddingHorizontal: 12, paddingVertical: 8,
-  },
-  addressSelectorTextInline: { flex: 1, overflow: 'hidden' },
-  addressSelectorLabelInline: { color: '#888', fontSize: 11, fontWeight: '500' },
-  addressSelectorValueInline: { color: '#1A1A1A', fontSize: 14, fontWeight: '800', flexShrink: 1 },
+  greetingAddressWrap: { flex: 1 },
+  greetingText: { color: '#767676', fontSize: 13, fontWeight: '500', lineHeight: 14, marginBottom: 3 },
+  addressValueText: { color: '#1A1A1A', fontSize: 16, fontWeight: '700', flexShrink: 1, lineHeight: 19 },
 
-  cartBtn: {
+  /* ── Status da loja (aberto/fechado) ── */
+  storeStatusWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginRight: 6,
+  },
+  storeStatusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+  storeStatusText: {
+    color: '#767676',
+    fontSize: 15,
+    fontWeight: '400',
+  },
+
+  /* ── Carrinho: bolinha com cinza escuro em volta (no lugar do sino de notificação) ── */
+  cartCircleBtn: {
     position: 'relative',
-    width: 40, height: 40,
+    width: 44, height: 44,
     alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   },
+  cartCircleInner: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: '#F2F2F2',
+    alignItems: 'center', justifyContent: 'center',
+  },
   cartBadge: {
-    position: 'absolute', top: 2, right: 2,
+    position: 'absolute', top: 0, right: 0,
     backgroundColor: '#E63535', borderRadius: 10,
     minWidth: 18, height: 18,
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1.5, borderColor: '#FFB800',
+    borderWidth: 1.5, borderColor: '#FFFFFF',
   },
   cartBadgeText: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 10 },
 

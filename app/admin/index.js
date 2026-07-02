@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../supabaseConfig';
+import { isAdminUser } from '../../utils/isAdmin';
+import { syncAdminPushRegistration } from '../../utils/pushNotifications';
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -20,6 +22,11 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     loadDashboard();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (isAdminUser(session?.user)) {
+        syncAdminPushRegistration(session.user);
+      }
+    });
   }, []);
 
   async function loadDashboard() {

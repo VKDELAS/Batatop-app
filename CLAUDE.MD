@@ -1,5 +1,7 @@
 # Batata Top — Guia do Projeto (CLAUDE.md)
 
+> **Documento canônico** do projeto. Prefira este guia em relação ao `README.md` (desatualizado em partes) e use o `INSTALAR.md` apenas para setup inicial e cuidados com dependências.
+
 > Documentação técnica para desenvolvedores e IAs que trabalham no projeto **Batata Top** — app mobile de delivery focado em batatas recheadas, para a cidade de **Iacanga-SP**.
 
 ---
@@ -8,7 +10,7 @@
 
 O Batata Top é um aplicativo mobile desenvolvido com **Expo (SDK 54)** e **React Native**. Utiliza **Expo Router v6** para navegação baseada em arquivos (file-based routing) e **Supabase** como Backend-as-a-Service.
 
-O backend de pagamentos é uma API separada hospedada na **Vercel** (`https://batatatop.vercel.app`), que intermedia todas as chamadas sensíveis ao Mercado Pago (mantendo o Access Token seguro no servidor).
+O backend compartilhado (pagamentos + push de pedidos) está no site **Next.js** hospedado na **Vercel** (`https://batatatop.vercel.app`). Repositório local: `C:\Users\SnyX\Documents\Sites\Site-da-mara`.
 
 ### Principais Funcionalidades
 
@@ -16,11 +18,12 @@ O backend de pagamentos é uma API separada hospedada na **Vercel** (`https://ba
 - **Cardápio (`app/cardapio.js`)**: Listagem de produtos com filtros por categoria e busca textual.
 - **Produto (`app/produto/[id].js`)**: Detalhe do produto com seleção de adicionais e observações.
 - **Carrinho (`app/cart.js`)**: Visualização, edição de quantidades e remoção de itens.
-- **Checkout (`app/checkout.tsx`)**: Fluxo completo de finalização de pedido — endereço, tipo de entrega (delivery ou retirada), método de pagamento (Dinheiro, PIX, Cartão de Crédito, Cartão de Débito), integração com Mercado Pago (Checkout Transparente) e cartões salvos.
+- **Checkout (`app/checkout.tsx`)**: Fluxo completo de finalização de pedido — endereço, tipo de entrega (delivery ou retirada), método de pagamento (Dinheiro, PIX, Cartão de Crédito, Cartão de Débito), integração com Mercado Pago (Checkout Transparente) e cartões salvos. Ao concluir, chama `notifyAdminNewOrder(orderId)`.
 - **Pedidos (`app/pedidos.js` + `app/pedidos/[id].js`)**: Histórico de pedidos do usuário com detalhe por pedido.
 - **Perfil (`app/profile.js`)**: Dados do usuário, endereço padrão, método de pagamento preferido, cartões salvos e logout. Sub-telas em `app/profile-data.js` e `app/profile-security.js`.
 - **Endereços (`app/addresses.js`)**: Gestão de endereços com integração ViaCEP e validação geográfica (somente Iacanga-SP).
-- **Admin (`app/admin/`)**: Painel administrativo protegido com dashboard, gestão de pedidos, produtos, cupons, promoções, caixa, feedbacks e imagens.
+- **Admin (`app/admin/`)**: Painel administrativo com dashboard, gestão de pedidos, produtos, cupons, promoções, caixa, feedbacks e imagens.
+- **Push de novo pedido (admin)**: Notificação **real do sistema** (Expo Push) — funciona com app fechado. Mostra cliente, itens e adicionais; toque abre `/admin/pedidos`.
 - **Autenticação (`app/auth/`)**: Telas de login (`login.js`) e cadastro (`register.js`) via Supabase Auth.
 
 ---
@@ -28,67 +31,72 @@ O backend de pagamentos é uma API separada hospedada na **Vercel** (`https://ba
 ## 2. Estrutura de Arquivos
 
 ```
-batata-top/
-├── app/                          # Rotas do Expo Router (file-based routing)
-│   ├── _layout.js                # Layout raiz: Header animado, TabBar, Contexts globais
-│   ├── index.js                  # Home: destaques, cupons, produtos em destaque
-│   ├── cardapio.js               # Listagem de produtos com filtros e busca
-│   ├── cart.js                   # Carrinho de compras
-│   ├── checkout.tsx              # Fluxo de finalização do pedido (TypeScript)
-│   ├── pedidos.js                # Histórico de pedidos do usuário
-│   ├── addresses.js              # Gestão de endereços (ViaCEP + validação Iacanga-SP)
-│   ├── profile.js                # Perfil do usuário, cartões e método de pagamento
-│   ├── profile-data.js           # Edição de nome e dados pessoais
-│   ├── profile-security.js       # Alteração de senha
-│   ├── auth/
-│   │   ├── login.js              # Tela de login
-│   │   └── register.js           # Tela de cadastro
-│   ├── produto/
-│   │   └── [id].js               # Detalhe do produto (adicionais, observações)
-│   ├── pedidos/
-│   │   └── [id].js               # Detalhe de um pedido específico
-│   ├── hooks/
-│   │   ├── useProdutos.js        # Hooks de produtos: useProdutos, useProdutoById,
-│   │   │                         #   useProdutosPorCategoria, useBuscarProdutos
-│   │   └── usePedidos.js         # Hook de pedidos: criarPedido, buscarPedidos...
+batata-top/                          # App mobile (este repositório)
+├── app/
+│   ├── _layout.js                   # Layout raiz + AdminPushRegistration
+│   ├── index.js                     # Home
+│   ├── cardapio.js
+│   ├── cart.js
+│   ├── checkout.tsx                 # Finaliza pedido + notifyAdminNewOrder()
+│   ├── pedidos.js
+│   ├── addresses.js
+│   ├── profile.js
+│   ├── profile-data.js
+│   ├── profile-security.js
+│   ├── auth/                        # login.js, register.js
+│   ├── produto/[id].js
+│   ├── pedidos/[id].js
+│   ├── hooks/                       # useProdutos.js, usePedidos.js
 │   └── admin/
-│       ├── _layout.js            # Layout da área admin
-│       ├── index.js              # Dashboard: status da loja, pedidos do dia, receita
-│       ├── pedidos.js            # Gerenciamento de pedidos (admin)
-│       ├── produtos.js           # Cadastro/edição de produtos
-│       ├── cupons.js             # Gerenciamento de cupons de desconto
-│       ├── promocoes.js          # Gerenciamento de promoções
-│       ├── caixa.js              # Controle de caixa
-│       ├── feedbacks.js          # Visualização de feedbacks
-│       └── imagens.js            # Upload/gestão de imagens de produtos
+│       ├── _layout.js
+│       ├── index.js                 # Re-registra push token ao abrir painel
+│       ├── pedidos.js               # Polling 10s
+│       ├── produtos.js, cupons.js, promocoes.js
+│       ├── caixa.js                 # Polling 30s
+│       ├── feedbacks.js, imagens.js
 ├── components/
-│   └── PaymentMethodModal.js     # Modal de seleção de método de pagamento (perfil)
-├── constants/
-│   └── theme.js                  # Design System: COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS
+│   ├── AdminPushRegistration.js   # Registro Expo Push + deep link ao tocar
+│   └── PaymentMethodModal.js
+├── constants/theme.js
+├── data/produtos.js                 # LEGADO — mock; produção usa Supabase
 ├── utils/
-│   ├── cartStore.js              # Store do carrinho (Observer pattern) + hook useCart()
-│   ├── mercadoPago.js            # Integração Mercado Pago: tokenização (client) + chamadas ao backend (Vercel)
-│   ├── usePaymentCards.ts        # Hook de cartões salvos: listar, salvar e remover (TypeScript)
-│   ├── paymentPrefs.js           # Persistência de método/cartão preferido via expo-secure-store
-│   ├── notificationSound.js      # Som de novo pedido (expo-audio) para painel admin
-│   └── supabase.js               # Re-exporta o cliente Supabase (use supabaseConfig.js diretamente)
+│   ├── cartStore.js
+│   ├── mercadoPago.js
+│   ├── usePaymentCards.ts
+│   ├── paymentPrefs.js
+│   ├── notificationSound.js       # Som new-order.mp3 (foreground)
+│   ├── pushNotifications.js         # Permissões, canal Android, token, listeners
+│   ├── notifyNewOrder.js            # Chama Edge Function ou Vercel API
+│   ├── orderNotificationContent.js  # Formato título/corpo da push
+│   ├── isAdmin.js                   # isAdminUser(user)
+│   └── supabase.js
+├── supabase/
+│   ├── migrations/
+│   │   └── 20250629120000_admin_push_tokens.sql
+│   └── functions/
+│       └── notify-admin-order/      # Edge Function (alternativa à Vercel)
+├── server/api/
+│   └── notify-new-order.js          # Cópia legada CommonJS (referência)
 ├── assets/
-│   └── sounds/
-│       └── new-order.mp3         # Som de alerta de novo pedido (admin)
-├── supabaseConfig.js             # Cria e exporta o cliente Supabase (usa variáveis de ambiente)
-├── .env                          # Variáveis de ambiente (não commitar!)
-├── package.json
-├── app.json
-├── babel.config.js
-├── metro.config.js
-└── tsconfig.json
+│   ├── banner.png
+│   └── sounds/new-order.mp3
+├── supabaseConfig.js
+├── app.json                         # Plugin expo-notifications configurado
+├── .env
+└── package.json                     # inclui expo-notifications, expo-device
+
+Site-da-mara/                        # Site Next.js + API Vercel (repositório separado)
+├── app/api/
+│   ├── mercadopago/                 # Rotas de pagamento MP
+│   └── notify-new-order/route.ts    # POST — envia push para admins
+└── lib/push-notifications.ts        # Monta mensagem + Expo Push API
 ```
 
 ---
 
-## 3. Variáveis de Ambiente (`.env`)
+## 3. Variáveis de Ambiente
 
-O projeto usa o prefixo `EXPO_PUBLIC_` para expor variáveis ao cliente React Native.
+### App mobile (`.env`)
 
 | Variável | Descrição |
 |---|---|
@@ -97,7 +105,16 @@ O projeto usa o prefixo `EXPO_PUBLIC_` para expor variáveis ao cliente React Na
 | `EXPO_PUBLIC_MERCADO_PAGO_PUBLIC_KEY` | Public Key do Mercado Pago (Checkout Transparente) |
 | `EXPO_PUBLIC_API_BASE_URL` | URL base da API Vercel (`https://batatatop.vercel.app`) |
 
-> **Atenção:** O Access Token do Mercado Pago **nunca** é exposto no app. Ele fica exclusivamente na API Vercel.
+### Site Vercel (`Site-da-mara/.env.local`)
+
+| Variável | Descrição |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | URL do Supabase |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Chave anon |
+| `SUPABASE_SERVICE_ROLE_KEY` | Chave service_role (servidor — push + webhook MP) |
+| `MERCADO_PAGO_ACCESS_TOKEN` | Access Token MP (nunca no app) |
+
+> **Atenção:** Access Token do Mercado Pago e `SUPABASE_SERVICE_ROLE_KEY` ficam **somente no servidor** (Vercel).
 
 ---
 
@@ -116,19 +133,15 @@ npm run ios
 npm run web
 ```
 
+> **Cuidado:** Não rode `npm audit fix --force` neste projeto — pode quebrar o Expo (ver `INSTALAR.md`).
+
 ---
 
 ## 5. Arquitetura e Padrões
 
 ### Navegação
 - **Expo Router v6** com file-based routing.
-- O arquivo `app/_layout.js` é o layout raiz e gerencia:
-  - **Header global animado** que se esconde ao rolar (via `ScrollYContext`).
-  - **Bottom Tab Bar** customizada.
-  - **Drawer Menu Lateral** animado.
-  - **`NavContext`**: controla a animação de transição entre telas.
-  - **`ScrollYContext`**: compartilha o `Animated.Value` do scroll e a função `resetHeader()`.
-  - **`HeaderHeightContext`**: compartilha a altura real do header para que as telas apliquem o `paddingTop` correto.
+- O arquivo `app/_layout.js` gerencia Header animado, TabBar, Drawer, contexts (`NavContext`, `ScrollYContext`, `HeaderHeightContext`) e monta `AdminPushRegistration`.
 
 **Como usar nas telas:**
 ```js
@@ -137,40 +150,34 @@ import { useScrollHandler, useHeaderHeight } from './_layout';
 const { onScroll, resetHeader } = useScrollHandler();
 const headerHeight = useHeaderHeight();
 
-// No ScrollView:
-// onScroll={onScroll}
-// scrollEventThrottle={16}
+// ScrollView: onScroll={onScroll} scrollEventThrottle={16}
 // contentContainerStyle={{ paddingTop: headerHeight }}
 
-// Em useFocusEffect para restaurar o header ao voltar:
-useFocusEffect(useCallback(() => { resetHeader(); }, [resetHeader]));
+// useFocusEffect: resetHeader() ao voltar para a tela
 ```
 
 ### Gerenciamento de Estado
 
-**Carrinho (`utils/cartStore.js`):**
-- Implementa o padrão Observer com `Set` de listeners.
-- `cartStore` é o objeto singleton com métodos: `getCart`, `subscribe`, `addToCart`, `removeFromCart`, `updateQuantity`, `clearCart`, `getCartCount`, `getCartTotal`.
-- O hook `useCart()` encapsula o `subscribe` e retorna `{ items, count, total, add, remove, updateQty, clear }`.
-- O `cartItemId` é gerado como `${product.id}-${adIds}-${observacoes}` para distinguir o mesmo produto com adicionais/observações diferentes.
+**Carrinho (`utils/cartStore.js`):** Observer pattern + hook `useCart()`. `cartItemId` = `${product.id}-${adIds}-${observacoes}`.
 
-**Dados do Backend:**
-- Hooks customizados em `app/hooks/` encapsulam a lógica do Supabase.
-- `useProdutos.js` exporta: `useProdutos`, `useProdutoById`, `useProdutosPorCategoria`, `useBuscarProdutos`.
-- `usePedidos.js` exporta: `usePedidos` com métodos `criarPedido`, `buscarPedidosPorUsuario`, `buscarPedidoPorId`, `atualizarStatusPedido`.
+**Backend:** Hooks em `app/hooks/` (`useProdutos.js`, `usePedidos.js`).
 
-**Cartões Salvos (`utils/usePaymentCards.ts`):**
-- Hook TypeScript `usePaymentCards()` que gerencia cartões do Mercado Pago vinculados ao usuário Supabase.
-- Garante customer único no MP (`ensureCustomerId`), tokeniza no client via Public Key, salva na tabela `payment_cards` do Supabase.
+**Cartões (`utils/usePaymentCards.ts`):** Tokenização client-side + tabela `payment_cards`.
 
-**Preferências de Pagamento (`utils/paymentPrefs.js`):**
-- Persiste método preferido e `card_id` preferido usando `expo-secure-store`.
-- Funções: `getPreferredPaymentMethod`, `setPreferredPaymentMethod`, `getPreferredCardId`, `setPreferredCardId`.
+**Preferências (`utils/paymentPrefs.js`):** Método/cartão preferido via `expo-secure-store`.
+
+### Atualização de Dados
+
+| Área | Estratégia | Onde |
+|---|---|---|
+| Pedidos do usuário | Realtime (`UPDATE` orders) + polling 30s | `app/pedidos.js` |
+| Admin — lista | Polling 10s | `app/admin/pedidos.js` |
+| Admin — caixa | Polling 30s | `app/admin/caixa.js` |
+| Admin — novo pedido | **Expo Push** (servidor → celular) | Vercel `/api/notify-new-order` |
 
 ### Estilização
-- **`StyleSheet` do React Native** para todos os componentes (sem NativeWind/Tailwind).
-- **`constants/theme.js`** é a fonte única de verdade do Design System. Sempre importar daqui, nunca hardcodar valores de cor/espaçamento.
-- Paleta: Amarelo `#FFB800` (primária), Vermelho `#E61E2A` (secundária), fundo branco.
+- **`StyleSheet` + `constants/theme.js`** — sem NativeWind/Tailwind.
+- Paleta: Amarelo `#FFB800`, Vermelho `#E61E2A`, fundo branco.
 
 ---
 
@@ -180,80 +187,237 @@ useFocusEffect(useCallback(() => { resetHeader(); }, [resetHeader]));
 
 | Tabela | Descrição |
 |---|---|
-| `products` | Produtos do cardápio: `id`, `name`, `description`, `price`, `category`, `image_url`, `available` |
-| `orders` | Pedidos: `id`, `order_number`, `user_id`, `customer_name`, `customer_phone`, `customer_address`, `customer_neighborhood`, `customer_complement`, `payment_method`, `delivery_type`, `total_amount`, `discount_amount`, `coupon_code`, `status`, `notes`, `metadata`, `created_at` |
-| `order_items` | Itens de um pedido: `product_id`, `product_name`, `product_price`, `quantity`, `adicionais`, `pasta_type` |
-| `addresses` | Endereços dos usuários: vinculados ao `user_id` |
-| `payment_cards` | Cartões salvos: `user_id`, `mp_customer_id`, `mp_card_id`, `last_four`, `payment_method_id`, `card_type`, `cardholder_name`, `is_default` |
-| `store_settings` | Configurações da loja (ex: `store_status`) |
+| `products` | Cardápio |
+| `adicionais` / `product_adicionais` | Adicionais e relação com produtos |
+| `orders` | Pedidos completos |
+| `order_items` | Itens: `product_name`, `quantity`, `adicionais[]` (strings), `notes` |
+| `addresses` | Endereços por `user_id` |
+| `payment_cards` | Cartões salvos Mercado Pago |
+| `store_settings` | Status loja, entregas, promoções (JSON) |
 | `coupons` | Cupons de desconto |
+| `uploaded_images` | Imagens admin |
+| `feedbacks` | Feedbacks |
+| `admin_push_tokens` | Tokens Expo Push dos admins |
+
+### Migration push (obrigatória)
+
+Arquivo: `supabase/migrations/20250629120000_admin_push_tokens.sql`
+
+Rodar uma vez no [SQL Editor do Supabase](https://supabase.com/dashboard/project/eucwoxjmjfqylyrqunwk/sql/new).
 
 ### Storage
-- Bucket público **`Products`**: imagens dos produtos.
-- URL pública base: `https://eucwoxjmjfqylyrqunwk.supabase.co/storage/v1/object/public/Products/`
+- Bucket **`Products`**: `https://eucwoxjmjfqylyrqunwk.supabase.co/storage/v1/object/public/Products/`
 
 ### Status de Pedidos
-`pending` → `preparing` → `ready` → `delivered` / `cancelled`
+`pending` / `awaiting_payment` → `preparing` → `ready` → `delivered` / `cancelled`
 
 ---
 
-## 7. Integração Mercado Pago (Checkout Transparente)
+## 7. API Vercel (Site-da-mara)
 
-A integração segue o modelo de segurança recomendado pelo Mercado Pago:
+Repositório: `Site-da-mara` → deploy em `https://batatatop.vercel.app`.
 
 ```
-App (client) ──► API Vercel (server) ──► Mercado Pago API
-      │                                         │
- Public Key                              Access Token
- (tokenização)                          (cobrança)
+App (client) ──► batatatop.vercel.app/api/... ──► Mercado Pago / Supabase / Expo Push
+      │
+ Public Key (MP)                    Access Token + service_role (servidor)
 ```
 
-**Fluxos disponíveis (`utils/mercadoPago.js`):**
+### Rotas Mercado Pago (`/api/mercadopago/`)
 
-| Função | Descrição |
+`preference`, `pix`, `pix-status`, `card-payment`, `customer`, `save-card`, `delete-card`, `webhook`
+
+Chamadas do app: `utils/mercadoPago.js` → `EXPO_PUBLIC_API_BASE_URL/api/mercadopago/{path}`
+
+### Rota Push (`/api/notify-new-order`)
+
+| Campo | Valor |
 |---|---|
-| `tokenizeCard(...)` | Tokeniza dados de cartão novo direto na API do MP (Public Key, client-side) |
-| `tokenizeSavedCardCvv(...)` | Tokeniza CVV de cartão já salvo (Public Key, client-side) |
-| `createPixPayment(...)` | Cria pagamento PIX via backend Vercel |
-| `createCardPayment(...)` | Cria cobrança no cartão via backend Vercel |
-| `createPaymentPreference(...)` | Cria preferência de checkout via backend Vercel |
-| `createCustomer(...)` | Cria customer no MP via backend Vercel |
-| `saveCardToCustomer(...)` | Associa token de cartão a um customer no MP via backend Vercel |
-| `deleteCustomerCard(...)` | Remove cartão de um customer no MP via backend Vercel |
-| `chargeWithSavedCard(...)` | Tokeniza CVV client-side, depois chama `createCardPayment` |
-| `guessPaymentMethodId(...)` | Detecta a bandeira do cartão pelo número (Visa, Master, Elo, etc.) |
+| Método | `POST` |
+| Body | `{ "orderId": "uuid-do-pedido" }` |
+| Arquivo (site) | `Site-da-mara/app/api/notify-new-order/route.ts` |
+| Helper (site) | `Site-da-mara/lib/push-notifications.ts` |
 
-**Rotas da API Vercel** (`/api/mercadopago/`):
-`preference`, `pix`, `card-payment`, `customer`, `save-card`, `delete-card`
+**O que faz:**
+1. Busca pedido + `order_items` no Supabase (service_role)
+2. Busca todos os tokens em `admin_push_tokens`
+3. Envia push via [Expo Push API](https://docs.expo.dev/push-notifications/sending-notifications/)
 
 ---
 
-## 8. Som de Notificação (Admin)
+## 8. Push Notification de Novo Pedido (Admin)
 
-`utils/notificationSound.js` usa **expo-audio** para tocar `assets/sounds/new-order.mp3` quando um novo pedido chega no painel admin.
+Notificação **real do sistema operacional** (como WhatsApp) — funciona com app **fechado**, em background ou aberto.
 
-- `configureNotificationAudio()`: configura o áudio para tocar mesmo no modo silencioso (iOS). Chamado em `app/_layout.js` na inicialização.
-- `playNewOrderSound(loopCount)`: toca o som N vezes em sequência.
-- `stopNewOrderSound()`: pausa o som.
-- Fallback web: sintetiza beeps via Web Audio API.
+### Fluxo completo
+
+```
+1. Admin loga no app → aceita permissão → token salvo em admin_push_tokens
+2. Cliente finaliza checkout (app/checkout.tsx)
+3. notifyAdminNewOrder(orderId) é chamado
+4. POST https://batatatop.vercel.app/api/notify-new-order
+5. Vercel monta mensagem e envia via Expo Push API
+6. Admin recebe notificação na barra do celular + som new-order.mp3
+7. Toque na notificação → app abre /admin/pedidos
+```
+
+### Setup (checklist)
+
+- [x] Código no app mobile (`pushNotifications.js`, `AdminPushRegistration.js`, `notifyNewOrder.js`)
+- [x] Rota no site Vercel (`Site-da-mara/app/api/notify-new-order/route.ts`)
+- [ ] SQL `admin_push_tokens` rodado no Supabase
+- [ ] Deploy do `Site-da-mara` na Vercel (git push)
+- [ ] Admin testou no **celular físico** (não simulador)
+- [ ] Produção: `eas init` + `extra.eas.projectId` no `app.json`
+
+### App mobile — arquivos
+
+| Arquivo | Função |
+|---|---|
+| `utils/pushNotifications.js` | Permissões, canal Android `new-orders`, registro token, listeners |
+| `components/AdminPushRegistration.js` | Montado em `app/_layout.js` |
+| `utils/notifyNewOrder.js` | Edge Function (tenta) → fallback Vercel API |
+| `utils/isAdmin.js` | Quem recebe/registra push |
+| `app/admin/index.js` | Re-sincroniza token ao abrir painel |
+| `app/checkout.tsx` | `notifyAdminNewOrder(created.id)` após insert |
+| `assets/sounds/new-order.mp3` | Som customizado da push |
+| `app.json` | Plugin `expo-notifications` + permissão `POST_NOTIFICATIONS` (Android) |
+
+### Conteúdo da notificação
+
+```
+Título:  Novo Pedido #123
+Corpo:   Maria Silva
+         ────────────────
+         2x Batata Calabresa
+            + Bacon, Cheddar
+         1x Refrigerante
+         ────────────────
+         Toque para gerenciar o pedido
+Som:     new-order.mp3 (canal Android prioridade MAX)
+Toque:   /admin/pedidos
+```
+
+### Registro do token (admin)
+
+`isAdminUser(user)` em `utils/isAdmin.js`:
+- E-mail `enzzobaraldo2008@gmail.com`
+- E-mail contendo `admin`
+- `user_metadata.role === 'admin'`
+
+Token upsert em `admin_push_tokens` via Supabase (RLS: admin gerencia só o próprio token).
+
+### Dependências push
+
+```json
+"expo-notifications": "~0.32.x",
+"expo-device": "~8.0.x"
+```
+
+### Alternativa: Supabase Edge Function
+
+Se preferir não usar Vercel para push:
+- Código: `supabase/functions/notify-admin-order/index.ts`
+- Deploy: `supabase functions deploy notify-admin-order`
+- `notifyNewOrder.js` tenta a Edge Function primeiro, depois Vercel
+
+### Som
+
+- **Checkout do cliente:** sem som de novo pedido.
+- **Admin:** som via push do sistema + reforço `playNewOrderSound()` se app estiver aberto (`notificationSound.js`).
 
 ---
 
 ## 9. Regras de Negócio Importantes
 
-- **Restrição Geográfica de Entrega**: O app só aceita endereços em **Iacanga-SP** (validado em `app/addresses.js` via ViaCEP).
-- **Tipo de Entrega**: O checkout suporta `"delivery"` (com endereço) e `"retirada"` (sem endereço, sem taxa).
-- **Cupons**: Aplicados no checkout com validação no Supabase (tabela `coupons`). O desconto é salvo em `orders.discount_amount` e `orders.coupon_code`.
-- **Adicionais**: Selecionados na tela do produto (`app/produto/[id].js`) e persistidos no carrinho via `adicionais[]` no item. O `cartItemId` distingue combinações diferentes do mesmo produto.
-- **Segurança de Pagamento**: O Access Token do Mercado Pago **nunca** vai ao app. Toda operação sensível passa pelo backend Vercel.
+- **Entrega:** Somente **Iacanga-SP** (`app/addresses.js` + ViaCEP).
+- **Tipo de entrega:** `"delivery"` ou `"retirada"`.
+- **Cupons:** Validados no checkout; salvos em `orders.discount_amount` + `coupon_code`.
+- **Adicionais:** Na tela do produto; `cartItemId` distingue combinações.
+- **Pagamento:** Access Token MP só no servidor Vercel.
+- **Admin:** Sem guard de rota em `/admin` — reforçar com RLS/`user_metadata.role` em produção.
 
 ---
 
 ## 10. Informações para Manutenção
 
-- **Design System**: Qualquer mudança visual global deve ser feita em `constants/theme.js`. Nunca hardcodar cores ou espaçamentos.
-- **Imagens de Produtos**: Construídas dinamicamente em `app/hooks/useProdutos.js`. Se `image_url` não começa com `http`, é completada com a URL base do bucket Supabase.
-- **TypeScript**: O projeto usa JS + TS mistos. `checkout.tsx` e `utils/usePaymentCards.ts` são TypeScript. Os demais arquivos são JavaScript.
-- **Sem NativeWind/Tailwind**: O projeto **não usa** NativeWind. A estilização é 100% via `StyleSheet` do React Native + tokens do `theme.js`.
-- **Admin**: O acesso ao painel admin (`/admin`) não tem proteção no roteamento — a proteção deve ser feita via RLS no Supabase ou verificação de `user_metadata.role` no próprio componente.
-- **`utils/supabase.js`**: Apenas re-exporta de `supabaseConfig.js`. Prefira importar diretamente de `../supabaseConfig` para evitar ambiguidade.
+- **Design System:** `constants/theme.js` — nunca hardcodar cores/espaçamentos.
+- **Imagens:** `useProdutos.js` completa URL do bucket se `image_url` não começa com `http`.
+- **TypeScript:** `checkout.tsx`, `usePaymentCards.ts` — resto JavaScript.
+- **Sem NativeWind:** Estilização 100% `StyleSheet` (README legado menciona Tailwind).
+- **`utils/supabase.js`:** Re-export; prefira `supabaseConfig.js`.
+- **`data/produtos.js`:** Mock legado.
+- **Dois repositórios:** App = `batata-top` | Site/API = `Site-da-mara`. Alterações em push ou MP no site exigem deploy Vercel separado.
+- **Testar push:** Celular físico + admin logado + permissão aceita + tabela `admin_push_tokens` criada + site deployado.
+
+# CLAUDE.md
+
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
+
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+## 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+---
+
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+Modo Homem das Cavernas
+'De gora em diante, remova palavras de preenchimento. Nada de enrolação. Resposta direta apenas. Use frases curtas de 3 a 6 palavras quando possível. Va direto ao resultado. Nao narre demais. Nao explique mais do que o necessário.
+
+
+Skill compactar:Quando eu disser 'COMPACTAR', resuma toda nossa conversa em 5 a 7 bullets com todo o contexto crítico, decisões e trechos essenciais. Formate de um jeito fácil de copiar e colar em um novo chat.

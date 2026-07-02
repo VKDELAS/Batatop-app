@@ -10,10 +10,10 @@ import * as Haptics from "expo-haptics";
 
 import { supabase } from "../supabaseConfig";
 import { useCart } from "../utils/cartStore";
-import { playNewOrderSound } from "../utils/notificationSound";
 import { createPixPayment, createPaymentPreference, tokenizeCard, createCardPayment, guessPaymentMethodId, chargeWithSavedCard } from "../utils/mercadoPago";
 import { getPreferredPaymentMethod, getPreferredCardId } from "../utils/paymentPrefs";
 import { usePaymentCards, formatCardDisplay, SavedCard } from "../utils/usePaymentCards";
+import { notifyAdminNewOrder } from "../utils/notifyNewOrder";
 
 const colors = {
   surface: "#FFFFFF",
@@ -61,7 +61,13 @@ type Address = {
   city: string; cep: string; is_default: boolean;
 };
 type DeliveryType = "delivery" | "retirada";
-type Payment = "dinheiro" | "pix" | "cartão de crédito" | "cartão de débito";
+type Payment =
+  | "dinheiro"
+  | "pix"
+  | "cartão de crédito"
+  | "cartão de débito"
+  | "cartão de crédito (entrega)"
+  | "cartão de débito (entrega)";
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
 function formatCep(raw: string) {
@@ -215,6 +221,13 @@ export default function Checkout() {
   // ── Handle payment method tap ─────────────────────────────────────────────
   async function handleSelectPayment(p: Payment) {
     setPayment(p);
+    // Cartão na maquininha (entrega): não usa Mercado Pago, não precisa de
+    // cartão salvo nem formulário — cai direto pro fluxo de "pending" igual dinheiro.
+    if (p === "cartão de crédito (entrega)" || p === "cartão de débito (entrega)") {
+      setSelectedSavedCard(null);
+      setUseManualCardForm(false);
+      return;
+    }
     if (p === "cartão de crédito" || p === "cartão de débito") {
       const cards = savedCards.length > 0 ? savedCards : await loadSavedCards();
       const match = cards.find((c) => c.card_type === p);
@@ -412,6 +425,7 @@ export default function Checkout() {
       if (cepError) return cepError;
     }
     if (items.length === 0) return "Sua sacola está vazia";
+    // Cartão na entrega (maquininha) não exige nenhum dado extra — é só um rótulo.
     if (payment === "cartão de crédito" || payment === "cartão de débito") {
       if (selectedSavedCard && !useManualCardForm) {
         if (savedCardCvv.length < 3) return "Digite o CVV do cartão salvo";
@@ -470,6 +484,7 @@ export default function Checkout() {
           qr_code: pixResult.qrCode,
           qr_code_base64: pixResult.qrCodeBase64,
           payment_id: pixResult.paymentId,
+          order_id: pixResult.orderId,
           simulation: pixResult.simulation,
         };
       } else {
@@ -638,28 +653,39 @@ export default function Checkout() {
         .eq("id", couponData.id);
     }
 
-    // Play new order alert sound
-    await playNewOrderSound(1);
+    notifyAdminNewOrder(created.id);
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     clear();
     setSubmitting(false);
+
     router.replace(`/pedidos/${created.id}`);
   };
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.safe} edges={["top"]} testID="checkout-screen">
-      {/* Header */}
+      {/* Header (estilo iFood: back + título centralizado + ação "Limpar") */}
       <Animated.View
         style={[styles.header, styles.headerAnimated, { transform: [{ translateY: headerTranslateY }] }]}
         onLayout={(e) => setHeaderH(e.nativeEvent.layout.height)}
       >
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} testID="checkout-back">
-          <Ionicons name="chevron-back" size={22} color={colors.onSurface} />
+        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} testID="checkout-back" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <Ionicons name="chevron-back" size={24} color={colors.onSurface} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Finalizar pedido</Text>
-        <View style={{ width: 40 }} />
+        <Text style={styles.headerTitle} numberOfLines={1}>Finalizar pedido</Text>
+        <TouchableOpacity
+          onPress={() => {
+            Haptics.selectionAsync();
+            clear();
+            router.back();
+          }}
+          style={styles.headerClearBtn}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          testID="checkout-clear"
+        >
+          <Text style={styles.headerClearText}>Limpar</Text>
+        </TouchableOpacity>
       </Animated.View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
@@ -683,6 +709,41 @@ export default function Checkout() {
                 {items.length} {items.length === 1 ? "item" : "itens"} na sacola · confira os dados abaixo
               </Text>
             </View>
+          </View>
+
+          {/* ── Itens do pedido (sacola, estilo iFood) ── */}
+          <View style={styles.bagHeaderRow}>
+            <SectionLabel icon="bag-handle-outline" label="Seus Itens" />
+          </View>
+          <View style={styles.bagCard}>
+            {items.map((i: any, idx: number) => {
+              const lineTotal = (i.precoNum / 100) * i.quantity;
+              const extras: string[] = (i.adicionais || []).map((a: any) => a.name);
+              return (
+                <View
+                  key={i.cartItemId ?? `${i.id}-${idx}`}
+                  style={[styles.bagItemRow, idx > 0 && styles.bagItemRowDivider]}
+                >
+                  <Text style={styles.bagItemQty}>{i.quantity}x</Text>
+                  <View style={styles.bagItemBody}>
+                    <Text style={styles.bagItemName} numberOfLines={2}>{i.nome}</Text>
+                    {extras.length > 0 && (
+                      <Text style={styles.bagItemExtra} numberOfLines={3}>
+                        {extras.join(", ")}
+                      </Text>
+                    )}
+                    {!!i.observacoes && (
+                      <Text style={styles.bagItemObs} numberOfLines={2}>
+                        Obs: {i.observacoes}
+                      </Text>
+                    )}
+                  </View>
+                  <Text style={styles.bagItemPrice}>
+                    R$ {lineTotal.toFixed(2).replace(".", ",")}
+                  </Text>
+                </View>
+              );
+            })}
           </View>
 
           {/* ── 1. Dados pessoais ── */}
@@ -888,29 +949,72 @@ export default function Checkout() {
             ))}
           </View>
 
-          {/* ── 5. Pagamento ── */}
+          {/* ── 5. Pagamento (estilo iFood: lista agrupada) ── */}
           <SectionLabel icon="wallet-outline" label="Pagamento" />
-          <View style={styles.payGrid}>
-            {(["pix", "dinheiro", "cartão de crédito", "cartão de débito"] as Payment[]).map((p) => (
-              <TouchableOpacity
-                key={p}
-                style={[styles.payBtn, payment === p && styles.payBtnActive]}
-                onPress={() => handleSelectPayment(p)}
-                testID={`payment-${p.replace(/\s/g, "-")}`}
-              >
-                <Ionicons
-                  name={p === "pix" ? "qr-code" : p === "dinheiro" ? "cash" : "card"}
-                  size={18}
-                  color={payment === p ? colors.brand : colors.onSurface}
-                />
-                <Text style={[styles.payText, payment === p && { color: colors.brand, fontWeight: "800" }]}>
-                  {p.charAt(0).toUpperCase() + p.slice(1)}
-                </Text>
-              </TouchableOpacity>
-            ))}
+
+          <Text style={styles.payGroupLabel}>Pague pelo app</Text>
+          <View style={styles.payCard}>
+            {([
+              { key: "pix" as Payment, icon: "qr-code" as const, title: "Pix", subtitle: "Aprovação na hora" },
+              { key: "cartão de crédito" as Payment, icon: "card" as const, title: "Cartão de crédito", subtitle: "Online, via Mercado Pago" },
+              { key: "cartão de débito" as Payment, icon: "card-outline" as const, title: "Cartão de débito", subtitle: "Online, via Mercado Pago" },
+            ]).map((opt, idx) => {
+              const active = payment === opt.key;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[styles.payRow, idx > 0 && styles.payRowDivider]}
+                  onPress={() => handleSelectPayment(opt.key)}
+                  activeOpacity={0.7}
+                  testID={`payment-${opt.key.replace(/\s/g, "-")}`}
+                >
+                  <View style={[styles.payIconWrap, active && styles.payIconWrapActive]}>
+                    <Ionicons name={opt.icon} size={20} color={active ? colors.brand : colors.onSurfaceSecondary} />
+                  </View>
+                  <View style={styles.payRowTextWrap}>
+                    <Text style={[styles.payRowTitle, active && styles.payRowTitleActive]}>{opt.title}</Text>
+                    <Text style={styles.payRowSubtitle}>{opt.subtitle}</Text>
+                  </View>
+                  <View style={[styles.payRadioOuter, active && styles.payRadioOuterActive]}>
+                    {active && <View style={styles.payRadioInner} />}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
-          {/* Card transparent checkout form fields */}
+          <Text style={styles.payGroupLabel}>Pague na entrega</Text>
+          <View style={styles.payCard}>
+            {([
+              { key: "dinheiro" as Payment, icon: "cash" as const, title: "Dinheiro", subtitle: "Pague direto com o entregador" },
+              { key: "cartão de crédito (entrega)" as Payment, icon: "card" as const, title: "Cartão de crédito", subtitle: "Na maquininha, na entrega" },
+              { key: "cartão de débito (entrega)" as Payment, icon: "card-outline" as const, title: "Cartão de débito", subtitle: "Na maquininha, na entrega" },
+            ]).map((opt, idx) => {
+              const active = payment === opt.key;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[styles.payRow, idx > 0 && styles.payRowDivider]}
+                  onPress={() => handleSelectPayment(opt.key)}
+                  activeOpacity={0.7}
+                  testID={`payment-${opt.key.replace(/[\s()]+/g, "-").replace(/-+/g, "-").replace(/-$/, "")}`}
+                >
+                  <View style={[styles.payIconWrap, active && styles.payIconWrapActive]}>
+                    <Ionicons name={opt.icon} size={20} color={active ? colors.brand : colors.onSurfaceSecondary} />
+                  </View>
+                  <View style={styles.payRowTextWrap}>
+                    <Text style={[styles.payRowTitle, active && styles.payRowTitleActive]}>{opt.title}</Text>
+                    <Text style={styles.payRowSubtitle}>{opt.subtitle}</Text>
+                  </View>
+                  <View style={[styles.payRadioOuter, active && styles.payRadioOuterActive]}>
+                    {active && <View style={styles.payRadioInner} />}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Card transparent checkout form fields (só pagamento online via Mercado Pago) */}
           {(payment === "cartão de crédito" || payment === "cartão de débito") && (
             <View style={styles.cardFormContainer}>
               {selectedSavedCard && !useManualCardForm ? (
@@ -1094,8 +1198,9 @@ export default function Checkout() {
 
           {/* ── 8. Resumo ── */}
           <View style={styles.summary}>
+            <Text style={styles.summaryTitle}>Resumo do pedido</Text>
             <View style={styles.sumRow}>
-              <Text style={styles.sumLabel}>Subtotal</Text>
+              <Text style={styles.sumLabel}>Subtotal ({items.length} {items.length === 1 ? "item" : "itens"})</Text>
               <Text style={styles.sumValue}>R$ {subtotal.toFixed(2).replace(".", ",")}</Text>
             </View>
             <View style={styles.sumRow}>
@@ -1177,7 +1282,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   iconBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
-  headerTitle: { fontSize: 17, fontWeight: "800", color: colors.onSurface },
+  headerTitle: { flex: 1, textAlign: "center", fontSize: 17, fontWeight: "800", color: colors.onSurface, marginHorizontal: 4 },
+  headerClearBtn: { minWidth: 40, height: 40, alignItems: "flex-end", justifyContent: "center" },
+  headerClearText: { fontSize: 14, fontWeight: "700", color: colors.brandDark },
 
   input: {
     backgroundColor: colors.surfaceSecondary, borderRadius: radius.md,
@@ -1232,20 +1339,76 @@ const styles = StyleSheet.create({
   cutleryBtnActive: { borderColor: colors.brand, backgroundColor: colors.brandTertiary },
   cutleryText: { fontSize: 13, color: colors.muted, fontWeight: "600", flexShrink: 1 },
 
-  // Payment
-  payGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  payBtn: {
-    flexBasis: "48%", flexDirection: "row", alignItems: "center", gap: 8,
-    padding: 14, borderRadius: radius.md, borderWidth: 2, borderColor: colors.divider,
+  // ── Payment (estilo iFood: lista agrupada, radio à direita) ──────────────
+  payGroupLabel: {
+    fontSize: 11, fontWeight: "800", color: colors.muted,
+    textTransform: "uppercase", letterSpacing: 0.6,
+    marginTop: 14, marginBottom: 6, marginLeft: 2,
   },
-  payBtnActive: { borderColor: colors.brand, backgroundColor: colors.brandTertiary },
-  payText: { fontWeight: "600", color: colors.onSurface, fontSize: 13 },
+  payCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  payRow: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    paddingVertical: 14, paddingHorizontal: 14,
+  },
+  payRowDivider: { borderTopWidth: 1, borderTopColor: colors.divider },
+  payIconWrap: {
+    width: 40, height: 40, borderRadius: 12,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: colors.surfaceSecondary,
+  },
+  payIconWrapActive: { backgroundColor: colors.brandTertiary },
+  payRowTextWrap: { flex: 1 },
+  payRowTitle: { fontSize: 14.5, fontWeight: "700", color: colors.onSurface },
+  payRowTitleActive: { color: colors.brandDark },
+  payRowSubtitle: { fontSize: 12, color: colors.muted, fontWeight: "500", marginTop: 2 },
+  payRadioOuter: {
+    width: 22, height: 22, borderRadius: 11,
+    borderWidth: 2, borderColor: colors.borderStrong,
+    alignItems: "center", justifyContent: "center",
+  },
+  payRadioOuterActive: { borderColor: colors.brand },
+  payRadioInner: { width: 11, height: 11, borderRadius: 6, backgroundColor: colors.brand },
+
+  // ── Itens do pedido (estilo sacola iFood) ─────────────────────────────────
+  bagHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  bagCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    paddingHorizontal: 14,
+  },
+  bagItemRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, paddingVertical: 14 },
+  bagItemRowDivider: { borderTopWidth: 1, borderTopColor: colors.divider },
+  bagItemQty: { fontSize: 14, fontWeight: "700", color: colors.onSurface, minWidth: 26 },
+  bagItemBody: { flex: 1 },
+  bagItemName: { fontSize: 14.5, fontWeight: "700", color: colors.onSurface, lineHeight: 19 },
+  bagItemExtra: { fontSize: 12.5, color: colors.muted, marginTop: 3, lineHeight: 17 },
+  bagItemObs: { fontSize: 12.5, color: colors.onSurfaceSecondary, fontStyle: "italic", marginTop: 3, lineHeight: 17 },
+  bagItemPrice: { fontSize: 14, fontWeight: "700", color: colors.onSurface },
 
   // Summary
-  summary: { marginTop: spacing.xl, padding: 14, backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg },
-  sumRow: { flexDirection: "row", justifyContent: "space-between", marginVertical: 3 },
-  sumLabel: { color: colors.muted },
-  sumValue: { color: colors.onSurface, fontWeight: "600" },
+  summary: {
+    marginTop: spacing.xl, padding: 16, backgroundColor: colors.surface,
+    borderRadius: radius.lg, borderWidth: 1, borderColor: colors.divider,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04, shadowRadius: 6, elevation: 1,
+  },
+  summaryTitle: { fontSize: 13, fontWeight: "800", color: colors.onSurface, marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.4 },
+  sumRow: { flexDirection: "row", justifyContent: "space-between", marginVertical: 4 },
+  sumLabel: { color: colors.muted, fontSize: 13.5 },
+  sumValue: { color: colors.onSurface, fontWeight: "600", fontSize: 13.5 },
   totalLabel: { fontWeight: "800", fontSize: 16, color: colors.onSurface },
   totalValue: { fontWeight: "800", fontSize: 20, color: colors.brand },
 
@@ -1278,6 +1441,8 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 12,
     backgroundColor: colors.brandTertiary, borderRadius: radius.lg,
     padding: 14, marginBottom: 4,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03, shadowRadius: 5, elevation: 1,
   },
   introIconWrap: {
     width: 40, height: 40, borderRadius: 20,
@@ -1295,9 +1460,11 @@ const styles = StyleSheet.create({
   couponBtnText: { color: "#FFF", fontWeight: "800", fontSize: 13 },
   couponAppliedRow: {
     flexDirection: "row", alignItems: "center", gap: 10,
-    backgroundColor: "#EFFAF3", borderRadius: radius.md,
+    backgroundColor: "#EFFAF3", borderRadius: radius.lg,
     borderWidth: 1, borderColor: "#CDEFD9",
     paddingHorizontal: 14, paddingVertical: 12, marginBottom: 8,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03, shadowRadius: 5, elevation: 1,
   },
   couponAppliedCode: { fontWeight: "800", color: colors.onSurface, fontSize: 14, letterSpacing: 0.5 },
   couponAppliedDesc: { fontSize: 12, color: colors.success, fontWeight: "600", marginTop: 1 },
@@ -1311,11 +1478,13 @@ const styles = StyleSheet.create({
   cardFormContainer: {
     marginTop: 12,
     backgroundColor: '#FFFDF9',
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     borderWidth: 1.5,
     borderColor: '#FFE0B2',
     padding: 14,
     gap: 8,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03, shadowRadius: 5, elevation: 1,
   },
   cardFormTitle: {
     fontSize: 13,

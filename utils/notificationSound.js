@@ -34,7 +34,7 @@ export async function playNewOrderSound(loopCount = 3) {
       return;
     }
     if (!cachedPlayer) {
-      cachedPlayer = createAudioPlayer(require("../assets/sounds/new-order.mp3"));
+      cachedPlayer = createAudioPlayer(require("../assets/sounds/new_order.mp3"));
     }
     cachedPlayer.volume = 1.0;
     let plays = 0;

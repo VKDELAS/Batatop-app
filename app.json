@@ -4,7 +4,7 @@
     "slug": "batata-top",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/logo.png",
     "scheme": "batatatop",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
@@ -19,11 +19,12 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/logo.png",
         "backgroundColor": "#F97316"
       },
       "package": "com.batatatop.app",
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": ["POST_NOTIFICATIONS"]
     },
     "web": {
       "bundler": "metro",
@@ -33,7 +34,16 @@
     "plugins": [
       "expo-router",
       "expo-audio",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/logo.png",
+          "color": "#1A1A1A",
+          "sounds": ["./assets/sounds/new_order.mp3"],
+          "defaultChannel": "new-orders"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": false

@@ -108,11 +108,6 @@ export default function AdminPedidos() {
       if (error) throw error;
 
       const mapped = (data || []).map(mapOrderData);
-
-      // Notificar novo pedido com Haptics
-      if (!isInitial && mapped.length > lastCountRef.current) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      }
       lastCountRef.current = mapped.length;
       setOrders(mapped);
     } catch (e) {

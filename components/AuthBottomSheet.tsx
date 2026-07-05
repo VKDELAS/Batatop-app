@@ -1,22 +1,25 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
   Pressable,
   StyleSheet,
-  Image,
   Linking,
   useWindowDimensions,
+  LayoutChangeEvent,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '../supabaseConfig';
+import { SOFT_LOGOUT_KEY, emitAuthUiChange } from '../utils/authSession';
 import HelpModal from './HelpModal';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
+  withDelay,
   Easing,
 } from 'react-native-reanimated';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS } from '../constants/theme';
@@ -26,51 +29,119 @@ import { COLORS, TYPOGRAPHY, SPACING, RADIUS } from '../constants/theme';
 // (ex: gravar isso depois de um login bem-sucedido em login.js).
 const SAVED_USER_KEY = '@batatatop:savedUser';
 
-type SavedUser = { name: string };
+type SavedUser = { name: string; email?: string; phone?: string };
 
 type AuthBottomSheetProps = {
   visible: boolean;
   onClose: () => void;
 };
 
+// Transição entre estados (B -> A, A -> C, C -> A): devagar e suave de
+// propósito, sem pressa. Ajuste esse número se quiser mais rápido.
+const SWITCH_DURATION = 550;
+const SWITCH_STAGGER = 120; // atraso do conteúdo novo em relação à saída do antigo
+
 export default function AuthBottomSheet({ visible, onClose }: AuthBottomSheetProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = useWindowDimensions();
-  // loginfoto.jpeg é 900x1600 (9:16) — altura calculada na mão a partir da
-  // largura real da tela, em vez de aspectRatio (que quebra em position:absolute
-  // + left/right sem width explícito, principalmente em Android edge-to-edge).
-  const IMAGE_HEIGHT = SCREEN_WIDTH * (16 / 9);
+  // loginfoto.jpeg é 900x1600 (9:16) — altura de base calculada da largura
+  // real da tela, usada só como fallback antes da primeira medição do painel.
+  const IMAGE_HEIGHT_FALLBACK = SCREEN_WIDTH * (16 / 9);
+  // Sobreposição de segurança: a foto sempre estende um pouco além de onde o
+  // painel começa, pra nunca sobrar aquela faixa preta do fundo do sheet
+  // entre a foto e o painel branco. Precisa ser maior que o raio arredondado
+  // do topo do painel (RADIUS['2xl']), senão sobra uma frestinha bem na
+  // pontinha da curva.
+  const IMAGE_OVERLAP = 80;
 
   const translateY = useSharedValue(SCREEN_HEIGHT);
   const backdropOpacity = useSharedValue(0);
 
   const [savedUser, setSavedUser] = useState<SavedUser | null>(null);
-  const [estado, setEstado] = useState<'A' | 'B'>('A');
+  // 'A' = Já tenho conta / Criar conta (padrão)
+  // 'B' = Continuar como {nome} (usuário salvo localmente)
+  // 'C' = Como deseja continuar? (Celular / E-mail) — aberto a partir de A
+  const [estado, setEstado] = useState<'A' | 'B' | 'C'>('A');
   const [helpVisible, setHelpVisible] = useState(false);
 
-  // Conteúdo do Estado A (botões + social) — usado na transição B -> A
-  const switchOpacity = useSharedValue(1);
-  const switchTranslateY = useSharedValue(0);
+  // Altura real de cada bloco de conteúdo (medida via onLayout). Os blocos
+  // ficam sempre montados, um visível e os outros com opacity 0 por baixo,
+  // só pra já sabermos a altura de destino antes do usuário trocar de
+  // estado — é isso que evita o "pulo" de tamanho na hora de trocar.
+  const [heightA, setHeightA] = useState(0);
+  const [heightB, setHeightB] = useState(0);
+  const [heightC, setHeightC] = useState(0);
+  // Fica true assim que o usuário troca de estado manualmente (botão
+  // "Acessar outra conta" ou "Já tenho uma conta"); a partir daí quem
+  // controla panelHeight é só a animação do handler correspondente, não
+  // mais o efeito de sincronia abaixo.
+  const hasSwitchedRef = useRef(false);
+
+  const panelHeight = useSharedValue(0);
+  const opacityA = useSharedValue(0);
+  const translateYA = useSharedValue(0);
+  const opacityB = useSharedValue(0);
+  const translateYB = useSharedValue(0);
+  const opacityC = useSharedValue(0);
+  const translateYC = useSharedValue(0);
 
   const checkSavedUser = useCallback(async () => {
+    // Reset defensivo e SÍNCRONO de TODOS os blocos (A, B e C) antes de
+    // decidir o estado real. Antes só o C era zerado aqui — se o sheet
+    // fosse fechado no meio de uma transição (ex: Estado C -> onClose() +
+    // router.push, indo pro login.js), o componente não desmonta de
+    // verdade (só retorna null), então opacityC/estado/hasSwitchedRef
+    // ficavam "congelados" com os valores da última transição. Ao reabrir,
+    // havia uma janela (entre o commit do render e o await resolver) onde
+    // o Estado C antigo ainda estava com opacidade não-zerada bem na hora
+    // em que o Estado B (usuário salvo) era revelado por cima — causando a
+    // sobreposição visual. Zerando os três de uma vez aqui, não sobra
+    // nenhum valor de uma sessão anterior pra vazar pro próximo open.
+    hasSwitchedRef.current = false;
+    opacityA.value = 0;
+    translateYA.value = 0;
+    opacityB.value = 0;
+    translateYB.value = 0;
+    opacityC.value = 0;
+    translateYC.value = 0;
     try {
       const raw = await AsyncStorage.getItem(SAVED_USER_KEY);
       if (raw) {
         const user: SavedUser = JSON.parse(raw);
         setSavedUser(user);
         setEstado('B');
+        // ✅ FIX: Aguardar React renderizar o novo estado ANTES de mexer
+        // em Reanimated values. Isso evita sobreposição visual do Estado C.
+        await new Promise(resolve => setTimeout(resolve, 0));
+        opacityB.value = 1;
+        translateYB.value = 0;
       } else {
         setSavedUser(null);
         setEstado('A');
-        switchOpacity.value = 1;
-        switchTranslateY.value = 0;
+        await new Promise(resolve => setTimeout(resolve, 0));
+        opacityA.value = 1;
+        translateYA.value = 0;
       }
-    } catch {
+    } catch (err: unknown) {
       setSavedUser(null);
       setEstado('A');
+      await new Promise(resolve => setTimeout(resolve, 0));
+      opacityA.value = 1;
+      translateYA.value = 0;
     }
   }, []);
+
+  // Mantém panelHeight sincronizada com o estado real assim que a altura
+  // correspondente é conhecida — cobre o caso em que o checkSavedUser (que
+  // é assíncrono) só descobre que é Estado B depois do primeiro layout.
+  useEffect(() => {
+    if (hasSwitchedRef.current) return;
+    const target = estado === 'A' ? heightA : estado === 'B' ? heightB : heightC;
+    if (target > 0) {
+      panelHeight.value = target;
+    }
+  }, [estado, heightA, heightB, heightC]);
 
   useEffect(() => {
     if (visible) {
@@ -84,31 +155,149 @@ export default function AuthBottomSheet({ visible, onClose }: AuthBottomSheetPro
   }, [visible, checkSavedUser]);
 
   function handleAcessarOutraConta() {
+    hasSwitchedRef.current = true;
     setEstado('A');
-    // conteúdo do estado A entra de baixo pra cima, fluido (sem bounce)
-    switchOpacity.value = 0;
-    switchTranslateY.value = 24;
-    switchOpacity.value = withTiming(1, { duration: 380, easing: Easing.out(Easing.cubic) });
-    switchTranslateY.value = withTiming(0, { duration: 380, easing: Easing.out(Easing.cubic) });
+    // Transição devagar e suave: o bloco B esmaece e desce um pouco enquanto
+    // sai, o bloco A entra logo depois (levinho atraso) subindo de baixo pra
+    // cima, e o painel inteiro anima de altura pra altura já medida do
+    // Estado A — sem pulo nenhum, tudo no mesmo ritmo lento.
+    const targetHeight = heightA || panelHeight.value;
+
+    panelHeight.value = withTiming(targetHeight, {
+      duration: SWITCH_DURATION,
+      easing: Easing.inOut(Easing.cubic),
+    });
+
+    opacityB.value = withTiming(0, { duration: SWITCH_DURATION * 0.55, easing: Easing.in(Easing.cubic) });
+    translateYB.value = withTiming(-10, { duration: SWITCH_DURATION * 0.55, easing: Easing.in(Easing.cubic) });
+
+    translateYA.value = 18;
+    opacityA.value = withDelay(
+      SWITCH_STAGGER,
+      withTiming(1, { duration: SWITCH_DURATION - SWITCH_STAGGER, easing: Easing.out(Easing.cubic) })
+    );
+    translateYA.value = withDelay(
+      SWITCH_STAGGER,
+      withTiming(0, { duration: SWITCH_DURATION - SWITCH_STAGGER, easing: Easing.out(Easing.cubic) })
+    );
   }
 
-  function handleContinuarComo() {
-    // TODO: aqui entra a lógica real de retomar a sessão salva
-    onClose();
-  }
-
+  // A -> C: mesma dança de transição, só trocando qual bloco sai e qual entra.
   function handleJaTenhoConta() {
-    onClose();
-    router.push('/auth/login');
+    hasSwitchedRef.current = true;
+    setEstado('C');
+    const targetHeight = heightC || panelHeight.value;
+
+    panelHeight.value = withTiming(targetHeight, {
+      duration: SWITCH_DURATION,
+      easing: Easing.inOut(Easing.cubic),
+    });
+
+    opacityA.value = withTiming(0, { duration: SWITCH_DURATION * 0.55, easing: Easing.in(Easing.cubic) });
+    translateYA.value = withTiming(-10, { duration: SWITCH_DURATION * 0.55, easing: Easing.in(Easing.cubic) });
+
+    translateYC.value = 18;
+    opacityC.value = withDelay(
+      SWITCH_STAGGER,
+      withTiming(1, { duration: SWITCH_DURATION - SWITCH_STAGGER, easing: Easing.out(Easing.cubic) })
+    );
+    translateYC.value = withDelay(
+      SWITCH_STAGGER,
+      withTiming(0, { duration: SWITCH_DURATION - SWITCH_STAGGER, easing: Easing.out(Easing.cubic) })
+    );
+  }
+
+  // C -> A: usada pelo botão de voltar quando o usuário está na tela
+  // "Como deseja continuar?" (em vez de fechar o sheet inteiro).
+  function handleVoltarDeComoContinuar() {
+    hasSwitchedRef.current = true;
+    setEstado('A');
+    const targetHeight = heightA || panelHeight.value;
+
+    panelHeight.value = withTiming(targetHeight, {
+      duration: SWITCH_DURATION,
+      easing: Easing.inOut(Easing.cubic),
+    });
+
+    opacityC.value = withTiming(0, { duration: SWITCH_DURATION * 0.55, easing: Easing.in(Easing.cubic) });
+    translateYC.value = withTiming(-10, { duration: SWITCH_DURATION * 0.55, easing: Easing.in(Easing.cubic) });
+
+    translateYA.value = 18;
+    opacityA.value = withDelay(
+      SWITCH_STAGGER,
+      withTiming(1, { duration: SWITCH_DURATION - SWITCH_STAGGER, easing: Easing.out(Easing.cubic) })
+    );
+    translateYA.value = withDelay(
+      SWITCH_STAGGER,
+      withTiming(0, { duration: SWITCH_DURATION - SWITCH_STAGGER, easing: Easing.out(Easing.cubic) })
+    );
+  }
+
+  async function handleContinuarComo() {
+    // A sessão real do Supabase NUNCA foi destruída (ver profile.js —
+    // "Sim, lembrar" não chama signOut, só liga o SOFT_LOGOUT_KEY). Então
+    // não tem refresh nem setSession pra fazer aqui: só tirar a flag e
+    // confirmar que a sessão real ainda existe.
+    try {
+      console.log('🚀 ===== handleContinuarComo INICIADO =====', new Date().toISOString());
+
+      await AsyncStorage.setItem(SOFT_LOGOUT_KEY, 'false');
+      console.log('👻 Soft-logout desligado');
+      emitAuthUiChange();
+
+      const { data: { session } } = await supabase.auth.getSession();
+      console.log('1️⃣ Sessão real existe?', !!session);
+
+      if (!session) {
+        // Só acontece se a sessão tiver sido revogada de fato por fora
+        // (ex: usuário clicou "Esquecer conta" em outro aparelho, ou fez
+        // login em outro lugar que derrubou esta sessão). Nesse caso não
+        // tem como continuar sem senha mesmo — cai pro fallback de login.
+        console.log('❌ Sessão real não existe mais — precisa logar de novo');
+        throw new Error('Sessão não encontrada');
+      }
+
+      console.log('✅ Sessão confirmada — navegando pra home...');
+      onClose();
+      router.replace('/');
+    } catch (err) {
+      console.error('❌ ❌ ❌ ERRO em handleContinuarComo:', {
+        message: err?.message,
+        code: err?.code,
+        status: err?.status,
+        fullError: err
+      });
+
+      console.log('📵 Fallback: Abrindo login de novo');
+      onClose();
+      if (savedUser?.phone) {
+        console.log('📞 → Abrindo /auth/telefone');
+        router.push('/auth/telefone');
+      } else {
+        console.log('📧 → Abrindo /auth/login');
+        router.push({ pathname: '/auth/login', params: { email: savedUser?.email || '' } });
+      }
+    }
   }
 
   function handleCriarConta() {
     onClose();
-    router.push('/auth/register');
+    router.push('/auth/login');
+  }
+
+  // Estado C: escolha de Celular ou E-mail.
+  function handleEscolherCelular() {
+    onClose();
+    router.push('/auth/telefone');
+  }
+
+  function handleEscolherEmail() {
+    onClose();
+    router.push('/auth/login');
   }
 
   function handleGoogle() {
-    // TODO: integrar login social real (mesmo placeholder do login.js/register.js)
+    // TODO: integrar login social real (mesmo placeholder do login.js)
   }
 
   function handleFacebook() {
@@ -120,6 +309,21 @@ export default function AuthBottomSheet({ visible, onClose }: AuthBottomSheetPro
     Linking.openURL('https://wa.me/5500000000000');
   }
 
+  function handleLayoutA(e: LayoutChangeEvent) {
+    const h = e.nativeEvent.layout.height;
+    setHeightA((prev) => (prev !== h ? h : prev));
+  }
+
+  function handleLayoutB(e: LayoutChangeEvent) {
+    const h = e.nativeEvent.layout.height;
+    setHeightB((prev) => (prev !== h ? h : prev));
+  }
+
+  function handleLayoutC(e: LayoutChangeEvent) {
+    const h = e.nativeEvent.layout.height;
+    setHeightC((prev) => (prev !== h ? h : prev));
+  }
+
   const sheetStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: translateY.value }],
   }));
@@ -128,9 +332,34 @@ export default function AuthBottomSheet({ visible, onClose }: AuthBottomSheetPro
     opacity: backdropOpacity.value,
   }));
 
-  const switchStyle = useAnimatedStyle(() => ({
-    opacity: switchOpacity.value,
-    transform: [{ translateY: switchTranslateY.value }],
+  const imageStyle = useAnimatedStyle(() => {
+    if (panelHeight.value > 0) {
+      // Math.max garante que a foto nunca fica curta demais lá em cima
+      // (sempre cobre no mínimo até a status bar), mesmo se o painel de
+      // baixo (Estado A/B/C) ficar muito alto e "comer" quase toda a tela.
+      const computed = SCREEN_HEIGHT - panelHeight.value + IMAGE_OVERLAP;
+      return { height: Math.max(computed, insets.top + IMAGE_OVERLAP) };
+    }
+    return { height: IMAGE_HEIGHT_FALLBACK };
+  });
+
+  const panelStyle = useAnimatedStyle(() => ({
+    height: panelHeight.value > 0 ? panelHeight.value : undefined,
+  }));
+
+  const blockAStyle = useAnimatedStyle(() => ({
+    opacity: opacityA.value,
+    transform: [{ translateY: translateYA.value }],
+  }));
+
+  const blockBStyle = useAnimatedStyle(() => ({
+    opacity: opacityB.value,
+    transform: [{ translateY: translateYB.value }],
+  }));
+
+  const blockCStyle = useAnimatedStyle(() => ({
+    opacity: opacityC.value,
+    transform: [{ translateY: translateYC.value }],
   }));
 
   if (!visible) return null;
@@ -141,13 +370,18 @@ export default function AuthBottomSheet({ visible, onClose }: AuthBottomSheetPro
 
       <Animated.View style={[styles.sheet, sheetStyle]}>
         {/* Imagem grande no topo, altura exata calculada da largura real da tela (9:16) */}
-        <Image
+        <Animated.Image
           source={require('../assets/loginfoto.jpeg')}
-          style={[styles.image, { width: SCREEN_WIDTH, height: IMAGE_HEIGHT }]}
+          style={[styles.image, { width: SCREEN_WIDTH }, imageStyle]}
           resizeMode="cover"
         />
 
-        <Pressable style={[styles.backBtn, { top: insets.top + 8 }]} onPress={onClose} hitSlop={8}>
+        {/* No Estado C o botão volta pra A em vez de fechar o sheet inteiro. */}
+        <Pressable
+          style={[styles.backBtn, { top: insets.top + 8 }]}
+          onPress={() => (estado === 'C' ? handleVoltarDeComoContinuar() : onClose())}
+          hitSlop={8}
+        >
           <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
         </Pressable>
 
@@ -159,38 +393,65 @@ export default function AuthBottomSheet({ visible, onClose }: AuthBottomSheetPro
           <Ionicons name="help" size={20} color="#FFFFFF" />
         </Pressable>
 
-        {/* Painel flutua por cima da imagem, altura só do conteúdo */}
-        <View style={styles.content}>
-          {estado === 'B' && savedUser ? (
-            <>
-              <Pressable style={styles.btnFilled} onPress={handleContinuarComo}>
-                <Text style={styles.btnFilledText}>Continuar como {savedUser.name}</Text>
-              </Pressable>
-              <Pressable style={styles.btnOutline} onPress={handleAcessarOutraConta}>
-                <Text style={styles.btnOutlineText}>Acessar outra conta</Text>
-              </Pressable>
-            </>
-          ) : (
-            <Animated.View style={switchStyle}>
-              <Pressable style={styles.btnFilled} onPress={handleJaTenhoConta}>
-                <Text style={styles.btnFilledText}>Já tenho uma conta</Text>
-              </Pressable>
-              <Pressable style={styles.btnOutline} onPress={handleCriarConta}>
-                <Text style={styles.btnOutlineText}>Criar nova conta</Text>
-              </Pressable>
+        {/* Painel flutua por cima da imagem. A altura é animada (panelStyle);
+            os três blocos abaixo ficam sempre montados, sobrepostos, e só
+            trocam de opacidade/posição — assim dá pra medir a altura de um
+            enquanto outro está visível, sem pulos na troca. */}
+        <Animated.View style={[styles.content, panelStyle]}>
+          <Animated.View
+            style={[styles.stateBlock, blockBStyle]}
+            onLayout={handleLayoutB}
+            pointerEvents={estado === 'B' && savedUser ? 'auto' : 'none'}
+          >
+            {savedUser ? (
+              <>
+                <Pressable style={styles.btnFilled} onPress={handleContinuarComo}>
+                  <Text style={styles.btnFilledText}>Continuar como {savedUser.name}</Text>
+                </Pressable>
+                <Pressable style={styles.btnOutline} onPress={handleAcessarOutraConta}>
+                  <Text style={styles.btnOutlineText}>Acessar outra conta</Text>
+                </Pressable>
+              </>
+            ) : null}
+          </Animated.View>
 
-              <Text style={styles.acessarComText}>Acessar com</Text>
-              <View style={styles.socialRow}>
-                <Pressable style={styles.socialBtn} onPress={handleGoogle}>
-                  <Ionicons name="logo-google" size={22} color="#1A1A1A" />
-                </Pressable>
-                <Pressable style={styles.socialBtn} onPress={handleFacebook}>
-                  <Ionicons name="logo-facebook" size={22} color="#1A1A1A" />
-                </Pressable>
-              </View>
-            </Animated.View>
-          )}
-        </View>
+          <Animated.View
+            style={[styles.stateBlock, blockAStyle]}
+            onLayout={handleLayoutA}
+            pointerEvents={estado === 'A' ? 'auto' : 'none'}
+          >
+            <Pressable style={styles.btnFilled} onPress={handleJaTenhoConta}>
+              <Text style={styles.btnFilledText}>Já tenho uma conta</Text>
+            </Pressable>
+            <Pressable style={styles.btnOutline} onPress={handleCriarConta}>
+              <Text style={styles.btnOutlineText}>Criar nova conta</Text>
+            </Pressable>
+
+            <Text style={styles.acessarComText}>Acessar com</Text>
+            <View style={styles.socialRow}>
+              <Pressable style={styles.socialBtn} onPress={handleGoogle}>
+                <Ionicons name="logo-google" size={22} color="#1A1A1A" />
+              </Pressable>
+              <Pressable style={styles.socialBtn} onPress={handleFacebook}>
+                <Ionicons name="logo-facebook" size={22} color="#1A1A1A" />
+              </Pressable>
+            </View>
+          </Animated.View>
+
+          <Animated.View
+            style={[styles.stateBlock, blockCStyle]}
+            onLayout={handleLayoutC}
+            pointerEvents={estado === 'C' ? 'auto' : 'none'}
+          >
+            <Text style={styles.comoContinuarTitle}>Como deseja continuar?</Text>
+            <Pressable style={styles.btnFilled} onPress={handleEscolherCelular}>
+              <Text style={styles.btnFilledText}>Celular</Text>
+            </Pressable>
+            <Pressable style={styles.btnTextOnly} onPress={handleEscolherEmail} hitSlop={8}>
+              <Text style={styles.btnTextOnlyLabel}>E-mail</Text>
+            </Pressable>
+          </Animated.View>
+        </Animated.View>
       </Animated.View>
 
       <HelpModal
@@ -246,6 +507,15 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
     borderTopLeftRadius: RADIUS['2xl'],
     borderTopRightRadius: RADIUS['2xl'],
+    overflow: 'hidden',
+  },
+  // Cada bloco (Estado A / B / C) ocupa a largura toda e se posiciona no
+  // topo do painel; é o `content` (panelStyle) que controla a altura visível.
+  stateBlock: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
     paddingHorizontal: SPACING[6],
     paddingTop: SPACING[6],
     paddingBottom: SPACING[8],
@@ -297,5 +567,25 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // Estado C — "Como deseja continuar?"
+  comoContinuarTitle: {
+    fontSize: TYPOGRAPHY.sizes.lg,
+    fontWeight: '700',
+    color: COLORS.text,
+    textAlign: 'center',
+    marginBottom: SPACING[5],
+  },
+  btnTextOnly: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: SPACING[2],
+  },
+  btnTextOnlyLabel: {
+    // COLORS.accent (amarelo escuro) em vez de COLORS.primary — texto puro
+    // amarelo-claro sobre fundo branco tem contraste ruim.
+    color: COLORS.accent,
+    fontWeight: '700',
+    fontSize: TYPOGRAPHY.sizes.base,
   },
 });

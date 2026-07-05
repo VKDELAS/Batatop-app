@@ -6,72 +6,29 @@
 import {
   View, Text, ScrollView, StyleSheet, Pressable,
   TextInput, ActivityIndicator, Alert,
-  KeyboardAvoidingView, Platform, Animated,
+  KeyboardAvoidingView, Platform,
   FlatList, TouchableOpacity, BackHandler, Modal,
   StatusBar,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useNavContext, useHeaderHeight } from './_layout';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { supabase } from '../supabaseConfig';
+import { getEffectiveSession, subscribeAuthUiChange } from '../utils/authSession';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import MapSelector from 'components/MapSelector';
+import useGeolocationWithMaps from './hooks/useGeolocationWithMaps';
+import usePlacesAutocomplete from './hooks/usePlacesAutocomplete';
 
 const CIDADE_PERMITIDA = 'Iacanga';
 const UF_PERMITIDA     = 'SP';
 
-// PressableScale
-function PressableScale({ children, onPress, style, disabled }) {
-  const scale = useRef(new Animated.Value(1)).current;
-  const pressIn  = () => Animated.spring(scale, { toValue: 0.96, useNativeDriver: true, speed: 30 }).start();
-  const pressOut = () => Animated.spring(scale, { toValue: 1,    useNativeDriver: true, speed: 30 }).start();
-  return (
-    <Pressable onPress={disabled ? undefined : onPress} onPressIn={pressIn} onPressOut={pressOut} style={style}>
-      <Animated.View style={{ transform: [{ scale }] }}>{children}</Animated.View>
-    </Pressable>
-  );
-}
-
-// AuthGate
-function AuthGate({ onBack }) {
-  const router = useRouter();
-  return (
-    <View style={g.wrap}>
-      <Pressable style={g.backBtn} onPress={onBack}>
-        <Ionicons name="arrow-back" size={20} color={COLORS.primary} />
-      </Pressable>
-      <View style={g.sheet}>
-        <View style={g.iconWrap}>
-          <View style={g.iconCircle}>
-            <Ionicons name="location" size={34} color={COLORS.primary} />
-          </View>
-          <View style={g.lockBadge}>
-            <Ionicons name="lock-closed" size={11} color="#fff" />
-          </View>
-        </View>
-        <Text style={g.title}>Seus endereços</Text>
-        <Text style={g.sub}>Para salvar endereços de entrega você precisa estar logado.</Text>
-        <View style={g.warnBanner}>
-          <Ionicons name="information-circle" size={15} color={COLORS.primary} />
-          <Text style={g.warnText}>Não é possível adicionar endereços sem uma conta ativa.</Text>
-        </View>
-        <PressableScale onPress={() => router.push('/auth/login')} style={g.btnPrimary}>
-          <View style={g.btnInner}>
-            <Text style={g.btnPrimaryText}>Entrar na conta</Text>
-            <Ionicons name="arrow-forward" size={15} color="#fff" />
-          </View>
-        </PressableScale>
-        <PressableScale onPress={() => router.push('/auth/register')} style={g.btnSecondary}>
-          <View style={g.btnInner}>
-            <Ionicons name="person-add-outline" size={15} color={COLORS.primary} />
-            <Text style={g.btnSecondaryText}>Criar conta</Text>
-          </View>
-        </PressableScale>
-        <Text style={g.footer}>Rápido, gratuito e seus dados ficam seguros.</Text>
-      </View>
-    </View>
-  );
-}
+// Endereço calculado (mapa/GPS) sem login. Fica guardado aqui até a pessoa
+// entrar numa conta de verdade — nesse momento é inserido no Supabase pra
+// esse user e a chave é limpa. Ver `flushPendingAddress` mais abaixo.
+const PENDING_ADDRESS_KEY = '@batatatop:pendingAddress';
 
 // Modal busca logradouro
 function BuscaLogradouroModal({ visible, onClose, onSelect }) {
@@ -180,6 +137,96 @@ function AddressCard({ address, onSetDefault, onDelete }) {
   );
 }
 
+// SearchAddressScreen — Estado B: busca por texto (Nominatim/OpenStreetMap).
+// Selecionar uma sugestão OU clicar "Buscar pelo mapa" abre o MapSelector
+// (Estado C) já centrado no ponto escolhido, pra o usuário confirmar/ajustar
+// o pino antes de cair no AddressForm.
+function SearchAddressScreen({ onBack, onPickOnMap, onSuggestionSelected }) {
+  const { query, suggestions, loading, notFound, search, selectPlace, clearSearch } =
+    usePlacesAutocomplete();
+
+  const handleSelect = (item) => {
+    const parsed = selectPlace(item);
+    onSuggestionSelected(parsed);
+  };
+
+  return (
+    <View style={sr.wrap}>
+      <View style={sr.header}>
+        <Pressable style={sr.backBtn} onPress={onBack}>
+          <Ionicons name="arrow-back" size={20} color={COLORS.primary} />
+        </Pressable>
+        <Text style={sr.headerTitle}>Buscar endereço</Text>
+        <View style={{ width: 36 }} />
+      </View>
+
+      <View style={sr.searchRow}>
+        <Ionicons name="search" size={18} color={COLORS.primary} />
+        <TextInput
+          style={sr.searchInput}
+          value={query}
+          onChangeText={search}
+          placeholder="Buscar endereço e número"
+          placeholderTextColor={COLORS.textMuted}
+          autoFocus
+          returnKeyType="search"
+        />
+        {!!query && (
+          <Pressable onPress={clearSearch} hitSlop={8}>
+            <Ionicons name="close-circle" size={18} color={COLORS.textMuted} />
+          </Pressable>
+        )}
+      </View>
+      <Text style={sr.poweredBy}>powered by OpenStreetMap</Text>
+
+      {loading && (
+        <View style={sr.loaderRow}>
+          <ActivityIndicator size="small" color={COLORS.primary} />
+        </View>
+      )}
+
+      {!loading && suggestions.length > 0 && (
+        <FlatList
+          data={suggestions}
+          keyExtractor={(item) => String(item.place_id)}
+          style={sr.list}
+          renderItem={({ item }) => (
+            <TouchableOpacity style={sr.resultItem} onPress={() => handleSelect(item)}>
+              <Ionicons name="location-outline" size={16} color={COLORS.primary} />
+              <View style={sr.resultText}>
+                <Text style={sr.resultTitle} numberOfLines={1}>
+                  {item.address?.road || item.display_name.split(',')[0]}
+                </Text>
+                <Text style={sr.resultSub} numberOfLines={1}>{item.display_name}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={14} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          )}
+          ItemSeparatorComponent={() => <View style={sr.separator} />}
+        />
+      )}
+
+      {!loading && notFound && (
+        <View style={sr.notFoundWrap}>
+          <Text style={sr.notFoundTitle}>Não encontramos esse endereço</Text>
+          <Text style={sr.notFoundSub}>Verifique o que você digitou e tente de novo. Ou busque pelo mapa.</Text>
+          <Pressable onPress={onPickOnMap}>
+            <Text style={sr.mapLink}>Buscar pelo mapa</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {!loading && !notFound && suggestions.length === 0 && (
+        <View style={sr.notFoundWrap}>
+          <Pressable onPress={onPickOnMap}>
+            <Text style={sr.mapLink}>Buscar pelo mapa</Text>
+          </Pressable>
+        </View>
+      )}
+    </View>
+  );
+}
+
 // Field — componente estável (fora do AddressForm para não perder foco do TextInput a cada tecla)
 function Field({ label, field, value, onChangeText, placeholder, keyboardType, half, editable = true }) {
   return (
@@ -196,12 +243,23 @@ function Field({ label, field, value, onChangeText, placeholder, keyboardType, h
 }
 
 // AddressForm
-function AddressForm({ onSave, onCancel, saving }) {
-  const [form, setForm] = useState({ cep: '', street: '', number: '', complement: '', neighborhood: '' });
+// `initialValues` (opcional) vem do MapSelector (Estado C) — quando presente,
+// o formulário já abre com rua/bairro preenchidos e o toggle "Não sei meu
+// CEP" ligado automaticamente, já que o reverse geocoding não retorna CEP.
+// O usuário ainda revisa/edita os campos e a validação de cidade (ViaCEP)
+// roda igual ao fluxo manual, como uma segunda checagem.
+function AddressForm({ onSave, onCancel, saving, initialValues }) {
+  const [form, setForm] = useState(() => ({
+    cep: '',
+    street: initialValues?.street || '',
+    number: '',
+    complement: '',
+    neighborhood: initialValues?.neighborhood || '',
+  }));
   const [cepLoading, setCepLoading]         = useState(false);
   const [cepError, setCepError]             = useState('');
   const [cityError, setCityError]           = useState('');
-  const [semCep, setSemCep]                 = useState(false);
+  const [semCep, setSemCep]                 = useState(!!initialValues);
   const [verifying, setVerifying]           = useState(false);
 
   const set = (field) => (val) => setForm((p) => ({ ...p, [field]: val }));
@@ -346,14 +404,26 @@ export default function Addresses() {
   const [addresses, setAddresses] = useState([]);
   const [loading, setLoading]   = useState(false);
   const [saving, setSaving]     = useState(false);
-  const [showForm, setShowForm] = useState(false);
+
+  // Máquina de estados da tela: 'list' (padrão) | 'search' (Estado B) |
+  // 'pick' (Estado C - MapSelector) | 'form' (AddressForm, com ou sem
+  // initialValues vindos do mapa).
+  const [screen, setScreen]                 = useState('list');
+  const [pickOrigin, setPickOrigin]         = useState('list');
+  const [pickInitialCoords, setPickInitialCoords] = useState(null);
+  const [formInitialValues, setFormInitialValues] = useState(null);
+  const [requestingGeo, setRequestingGeo]   = useState(false);
 
   const router = useRouter();
   const { lastRoute, setAnimation } = useNavContext();
   const headerHeight = useHeaderHeight();
+  const { permissionGranted, checkPermission, requestPermission, getLocation, error: geoError } =
+    useGeolocationWithMaps();
 
   const handleBack = () => {
-    if (showForm) { setShowForm(false); return true; }
+    if (screen === 'form') { setScreen('list'); setFormInitialValues(null); return true; }
+    if (screen === 'pick') { setScreen(pickOrigin); return true; }
+    if (screen === 'search') { setScreen('list'); return true; }
     setAnimation('slide_from_left');
     router.replace(lastRoute || '/');
     return true;
@@ -362,12 +432,83 @@ export default function Addresses() {
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', handleBack);
     return () => sub.remove();
-  }, [lastRoute, showForm]);
+  }, [lastRoute, screen, pickOrigin]);
+
+  // Estado A: em vez de duplicar uma tela de mapa fixo, pegamos a coordenada
+  // do GPS e ja abrimos direto o MapSelector (Estado C) centrado nela - o
+  // usuario ainda pode ajustar o pino antes de confirmar.
+  const handleUseCurrentLocation = async () => {
+    setRequestingGeo(true);
+    try {
+      let granted = permissionGranted;
+      if (!granted) granted = await checkPermission();
+      if (!granted) granted = await requestPermission();
+
+      if (!granted) {
+        Alert.alert(
+          'Permissao necessaria',
+          'Pra usar sua localizacao atual, ative a permissao de localizacao nas configuracoes do app.'
+        );
+        return;
+      }
+
+      const coords = await getLocation();
+      if (!coords) {
+        Alert.alert('Erro', geoError || 'Nao foi possivel obter sua localizacao.');
+        return;
+      }
+
+      setPickInitialCoords(coords);
+      setPickOrigin('list');
+      setScreen('pick');
+    } finally {
+      setRequestingGeo(false);
+    }
+  };
+
+  const handleOpenSearch = () => setScreen('search');
+
+  const handlePickOnMapFromSearch = () => {
+    setPickInitialCoords(null);
+    setPickOrigin('search');
+    setScreen('pick');
+  };
+
+  const handleSuggestionSelected = (parsed) => {
+    setPickInitialCoords({ latitude: parsed.latitude, longitude: parsed.longitude });
+    setPickOrigin('search');
+    setScreen('pick');
+  };
+
+  const handleMapConfirm = (result) => {
+    setFormInitialValues(result);
+    setScreen('form');
+  };
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => setUser(session?.user ?? null));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => setUser(session?.user ?? null));
-    return () => subscription.unsubscribe();
+    // Respeita o soft-logout (ver utils/authSession.js) — sessão real do
+    // Supabase pode continuar ativa mesmo com "Sim, lembrar" acionado.
+    async function refreshEffectiveUser() {
+      const session = await getEffectiveSession();
+      const nextUser = session?.user ?? null;
+      setUser(nextUser);
+      // Endereço calculado sem login (ver handleSave) — assim que aparece
+      // um user de verdade, joga pra conta e limpa o pendente.
+      if (nextUser) await flushPendingAddress(nextUser);
+    }
+    refreshEffectiveUser();
+    const unsubscribeUi = subscribeAuthUiChange(refreshEffectiveUser);
+    // NÃO setar user direto de `session` aqui — a sessão real do Supabase
+    // se renova sozinha em background (autoRefreshToken: true) e dispara
+    // esse evento (ex: TOKEN_REFRESHED) mesmo com o soft-logout ligado.
+    // Setar direto pisaria no soft-logout. Reconfere via getEffectiveSession.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      refreshEffectiveUser();
+    });
+    return () => {
+      subscription.unsubscribe();
+      unsubscribeUi();
+    };
   }, []);
 
   const fetchAddresses = useCallback(async () => {
@@ -384,17 +525,54 @@ export default function Addresses() {
 
   useEffect(() => { fetchAddresses(); }, [fetchAddresses]);
 
+  // Roda quando um user real aparece (login de verdade, não soft-logout
+  // desligando). Se tinha endereço calculado sem login (ver handleSave),
+  // insere no Supabase pra essa conta e limpa a chave.
+  const flushPendingAddress = async (currentUser) => {
+    try {
+      const raw = await AsyncStorage.getItem(PENDING_ADDRESS_KEY);
+      if (!raw) return;
+      const pending = JSON.parse(raw);
+      const { count } = await supabase.from('addresses')
+        .select('*', { count: 'exact', head: true }).eq('user_id', currentUser.id);
+      const { error } = await supabase.from('addresses').insert({
+        ...pending, user_id: currentUser.id, is_default: !count,
+      });
+      if (error) return; // deixa o pendente salvo, tenta de novo no próximo login
+      await AsyncStorage.removeItem(PENDING_ADDRESS_KEY);
+      await fetchAddresses();
+    } catch { /* deixa o pendente salvo, tenta de novo no próximo login */ }
+  };
+
   const handleSave = async (form) => {
     setSaving(true);
     try {
-      const { error } = await supabase.from('addresses').insert({
-        user_id: user.id, street: form.street.trim(), number: form.number.trim(),
+      const addressData = {
+        street: form.street.trim(), number: form.number.trim(),
         complement: form.complement.trim(), neighborhood: form.neighborhood.trim(),
         city: CIDADE_PERMITIDA, state: UF_PERMITIDA,
-        cep: form.cep.replace(/\D/g, ''), is_default: addresses.length === 0,
+        cep: form.cep.replace(/\D/g, ''),
+      };
+
+      // Sem login: não dá pra gravar user_id nenhum — guarda local e sai.
+      // Vira endereço de verdade assim que a pessoa logar (flushPendingAddress).
+      if (!user) {
+        await AsyncStorage.setItem(PENDING_ADDRESS_KEY, JSON.stringify(addressData));
+        setScreen('list');
+        setFormInitialValues(null);
+        Alert.alert(
+          'Endereço calculado',
+          'Assim que você entrar na sua conta, esse endereço é salvo automaticamente.'
+        );
+        return;
+      }
+
+      const { error } = await supabase.from('addresses').insert({
+        ...addressData, user_id: user.id, is_default: addresses.length === 0,
       });
       if (error) throw error;
-      setShowForm(false);
+      setScreen('list');
+      setFormInitialValues(null);
       await fetchAddresses();
     } catch { Alert.alert('Erro', 'Não foi possível salvar o endereço.'); }
     finally  { setSaving(false); }
@@ -416,7 +594,34 @@ export default function Addresses() {
     ]);
   };
 
-  if (!user) return <AuthGate onBack={handleBack} />;
+  // Sem login: mesma tela de sempre (localização, busca, adicionar
+  // manualmente), só que `addresses` nunca é preenchido (fetchAddresses
+  // já retorna cedo sem user) — então a lista fica sempre vazia. Endereço
+  // salvo aqui vira pendente (ver handleSave) até logar de verdade.
+
+  // Estado C (mapa) e Estado B (busca) ocupam a tela inteira, fora do
+  // ScrollView/Header padrão — ambos tem seu próprio header com botão voltar.
+  if (screen === 'pick') {
+    return (
+      <MapSelector
+        initialCoords={pickInitialCoords}
+        onBack={() => setScreen(pickOrigin)}
+        onConfirm={handleMapConfirm}
+      />
+    );
+  }
+
+  if (screen === 'search') {
+    return (
+      <SearchAddressScreen
+        onBack={() => setScreen('list')}
+        onPickOnMap={handlePickOnMapFromSearch}
+        onSuggestionSelected={handleSuggestionSelected}
+      />
+    );
+  }
+
+  const headerTitle = screen === 'form' ? 'Novo endereço' : 'Endereço de Entrega';
 
   return (
     <View style={s.page}>
@@ -431,17 +636,20 @@ export default function Addresses() {
             <Pressable style={s.backBtn} onPress={handleBack}>
               <Ionicons name="arrow-back" size={22} color={COLORS.primary} />
             </Pressable>
-            <Text style={s.headerTitle}>
-              {showForm ? 'Novo endereço' : 'Endereço de Entrega'}
-            </Text>
+            <Text style={s.headerTitle}>{headerTitle}</Text>
             <View style={{ width: 36 }} />
           </View>
 
 
           {loading ? (
             <View style={s.loader}><ActivityIndicator color={COLORS.primary} size="large" /></View>
-          ) : showForm ? (
-            <AddressForm onSave={handleSave} onCancel={() => setShowForm(false)} saving={saving} />
+          ) : screen === 'form' ? (
+            <AddressForm
+              onSave={handleSave}
+              onCancel={() => { setScreen('list'); setFormInitialValues(null); }}
+              saving={saving}
+              initialValues={formInitialValues}
+            />
           ) : (
             <>
               {addresses.length === 0 && (
@@ -453,9 +661,29 @@ export default function Addresses() {
               {addresses.map((addr) => (
                 <AddressCard key={addr.id} address={addr} onSetDefault={handleSetDefault} onDelete={handleDelete} />
               ))}
-              <Pressable style={s.addBtn} onPress={() => setShowForm(true)}>
+
+              {/* Estado A: usa GPS + MapSelector pra ajustar o pino */}
+              <Pressable
+                style={[s.entryBtn, requestingGeo && { opacity: 0.6 }]}
+                onPress={handleUseCurrentLocation}
+                disabled={requestingGeo}
+              >
+                {requestingGeo
+                  ? <ActivityIndicator size="small" color={COLORS.primary} />
+                  : <Ionicons name="locate" size={19} color={COLORS.primary} />
+                }
+                <Text style={s.entryBtnText}>Usar minha localização atual</Text>
+              </Pressable>
+
+              {/* Estado B: busca por texto */}
+              <Pressable style={s.entryBtn} onPress={handleOpenSearch}>
+                <Ionicons name="search" size={19} color={COLORS.primary} />
+                <Text style={s.entryBtnText}>Buscar endereço</Text>
+              </Pressable>
+
+              <Pressable style={s.addBtn} onPress={() => setScreen('form')}>
                 <Ionicons name="add-circle-outline" size={20} color={COLORS.primary} />
-                <Text style={s.addBtnText}>Adicionar novo endereço</Text>
+                <Text style={s.addBtnText}>Adicionar manualmente</Text>
               </Pressable>
             </>
           )}
@@ -465,25 +693,6 @@ export default function Addresses() {
   );
 }
 
-// Estilos AuthGate
-const g = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: COLORS.background, alignItems: 'center', justifyContent: 'center', paddingHorizontal: SPACING[8], paddingTop: 130 },
-  backBtn: { position: 'absolute', top: 140, left: SPACING[5], width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.primary + '18', borderWidth: 2, borderColor: COLORS.primary + '50', alignItems: 'center', justifyContent: 'center', shadowColor: COLORS.primary, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.18, shadowRadius: 6, elevation: 3 },
-  sheet: { width: '100%', alignItems: 'center', gap: SPACING[3] },
-  iconWrap: { position: 'relative', marginBottom: SPACING[4] },
-  iconCircle: { width: 80, height: 80, borderRadius: 40, backgroundColor: COLORS.primary + '18', borderWidth: 2, borderColor: COLORS.primary + '40', alignItems: 'center', justifyContent: 'center' },
-  lockBadge: { position: 'absolute', bottom: 0, right: 0, width: 24, height: 24, borderRadius: 12, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: COLORS.background },
-  title: { color: COLORS.text, fontWeight: '800', fontSize: 24, letterSpacing: -0.5, textAlign: 'center' },
-  sub: { color: COLORS.textSecondary, fontSize: TYPOGRAPHY.sizes.sm, textAlign: 'center', lineHeight: 21, marginBottom: SPACING[2] },
-  warnBanner: { flexDirection: 'row', gap: SPACING[2], backgroundColor: COLORS.primary + '15', borderRadius: RADIUS.lg, borderWidth: 1, borderColor: COLORS.primary + '35', padding: SPACING[4], width: '100%', marginBottom: SPACING[2] },
-  warnText: { flex: 1, color: COLORS.primary, fontSize: 12, lineHeight: 17, fontWeight: '600' },
-  btnPrimary: { backgroundColor: COLORS.primary, borderRadius: RADIUS.lg, paddingVertical: SPACING[4], width: '100%', overflow: 'hidden' },
-  btnInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING[2] },
-  btnPrimaryText: { color: '#fff', fontWeight: '800', fontSize: TYPOGRAPHY.sizes.base },
-  btnSecondary: { borderRadius: RADIUS.lg, paddingVertical: SPACING[4], width: '100%', borderWidth: 1.5, borderColor: COLORS.primary, overflow: 'hidden' },
-  btnSecondaryText: { color: COLORS.primary, fontWeight: '700', fontSize: TYPOGRAPHY.sizes.base },
-  footer: { color: COLORS.textMuted, fontSize: 11, textAlign: 'center', marginTop: SPACING[4] },
-});
 
 // Estilos Modal busca
 const m = StyleSheet.create({
@@ -566,4 +775,28 @@ const s = StyleSheet.create({
   emptyText: { color: COLORS.textMuted, fontSize: TYPOGRAPHY.sizes.sm, fontWeight: '600' },
   addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING[2], borderWidth: 1.5, borderColor: COLORS.primary, borderRadius: RADIUS.xl, paddingVertical: SPACING[4], backgroundColor: COLORS.primary + '0A', marginTop: SPACING[3] },
   addBtnText: { color: COLORS.primary, fontWeight: '700', fontSize: TYPOGRAPHY.sizes.sm },
+  entryBtn: { flexDirection: 'row', alignItems: 'center', gap: SPACING[3], backgroundColor: COLORS.backgroundCard, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.xl, paddingVertical: SPACING[4], paddingHorizontal: SPACING[4], marginBottom: SPACING[3] },
+  entryBtnText: { color: COLORS.text, fontWeight: '700', fontSize: TYPOGRAPHY.sizes.sm },
+});
+
+// Estilos SearchAddressScreen (Estado B)
+const sr = StyleSheet.create({
+  wrap: { flex: 1, backgroundColor: COLORS.background },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING[5], paddingTop: Platform.OS === 'ios' ? 54 : 24, paddingBottom: SPACING[3] },
+  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: COLORS.primary + '15', borderWidth: 1.5, borderColor: COLORS.primary + '40', alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { color: COLORS.text, fontWeight: '800', fontSize: TYPOGRAPHY.sizes.base },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING[2], marginHorizontal: SPACING[5], backgroundColor: COLORS.backgroundElevated, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, paddingHorizontal: SPACING[4] },
+  searchInput: { flex: 1, paddingVertical: SPACING[3], color: COLORS.text, fontSize: TYPOGRAPHY.sizes.sm },
+  poweredBy: { color: COLORS.textMuted, fontSize: 10, textAlign: 'right', marginHorizontal: SPACING[5], marginTop: SPACING[1] },
+  loaderRow: { alignItems: 'center', paddingVertical: SPACING[6] },
+  list: { marginTop: SPACING[3], paddingHorizontal: SPACING[5] },
+  resultItem: { flexDirection: 'row', alignItems: 'center', gap: SPACING[3], paddingVertical: SPACING[4] },
+  resultText: { flex: 1 },
+  resultTitle: { color: COLORS.text, fontWeight: '600', fontSize: TYPOGRAPHY.sizes.sm },
+  resultSub: { color: COLORS.textMuted, fontSize: 11, marginTop: 2 },
+  separator: { height: 1, backgroundColor: COLORS.border },
+  notFoundWrap: { alignItems: 'center', paddingTop: SPACING[10], paddingHorizontal: SPACING[8], gap: SPACING[2] },
+  notFoundTitle: { color: COLORS.text, fontWeight: '700', fontSize: TYPOGRAPHY.sizes.base, textAlign: 'center' },
+  notFoundSub: { color: COLORS.textMuted, fontSize: TYPOGRAPHY.sizes.sm, textAlign: 'center', lineHeight: 19 },
+  mapLink: { color: COLORS.secondary, fontWeight: '700', fontSize: TYPOGRAPHY.sizes.sm, marginTop: SPACING[2] },
 });

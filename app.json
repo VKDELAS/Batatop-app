@@ -43,6 +43,12 @@
           "sounds": ["./assets/sounds/new_order.mp3"],
           "defaultChannel": "new-orders"
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow"
+        }
       ]
     ],
     "experiments": {

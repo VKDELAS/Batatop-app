@@ -3,11 +3,17 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useState, useEffect, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../supabaseConfig';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { useScrollHandler, useHeaderHeight } from './_layout';
 import { getPreferredPaymentMethod, setPreferredPaymentMethod, getPreferredCardId, setPreferredCardId } from '../utils/paymentPrefs';
 import { formatCardDisplay } from '../utils/usePaymentCards';
+import { SOFT_LOGOUT_KEY, emitAuthUiChange } from '../utils/authSession';
 import PaymentMethodModal from '../components/PaymentMethodModal';
+import LogoutRememberModal from '../components/LogoutRememberModal';
+
+// Precisa ser IGUAL à SAVED_USER_KEY de components/AuthBottomSheet.tsx
+const SAVED_USER_KEY = '@batatatop:savedUser';
 
 export default function Profile() {
   const router = useRouter();
@@ -21,6 +27,7 @@ export default function Profile() {
   const [selectedCardId, setSelectedCardId] = useState(null);
   const [selectedCardInfo, setSelectedCardInfo] = useState(null);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
+  const [logoutModalVisible, setLogoutModalVisible] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -31,6 +38,16 @@ export default function Profile() {
 
   async function checkUser() {
     try {
+      // Se o usuário escolheu "Sim, lembrar" antes, a sessão real do Supabase
+      // continua válida (não foi revogada), mas a UI precisa fingir
+      // deslogado até ele confirmar em "Continuar como [nome]".
+      const softLoggedOut = (await AsyncStorage.getItem(SOFT_LOGOUT_KEY)) === 'true';
+      if (softLoggedOut) {
+        console.log('👻 Soft-logout ativo — tratando como deslogado na UI');
+        setUser(null);
+        return;
+      }
+
       const { data: { session } } = await supabase.auth.getSession();
       const u = session?.user || null;
       setUser(u);
@@ -124,18 +141,66 @@ export default function Profile() {
     }
   };
 
-  const handleLogout = async () => {
-    Alert.alert('Sair da conta', 'Deseja realmente sair da sua conta?', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Sair',
-        style: 'destructive',
-        onPress: async () => {
-          await supabase.auth.signOut();
-          router.replace('/');
-        }
+  const handleLogout = () => {
+    setLogoutModalVisible(true);
+  };
+
+  const handleRememberAccount = async () => {
+    setLogoutModalVisible(false);
+    console.log('🚪 ===== handleRememberAccount INICIADO =====', new Date().toISOString());
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const u = session?.user;
+
+      if (u?.id) {
+        // Query profiles pra dados completos (telefone + full_name)
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('telefone, full_name')
+          .eq('id', u.id)
+          .maybeSingle();
+
+        // Monta userData só pra exibição ("Continuar como [nome]") — não
+        // guarda mais refreshToken: a sessão real nunca é destruída, então
+        // não tem token nenhum pra restaurar depois.
+        const userData = {
+          name: profile?.full_name || u?.user_metadata?.full_name || 'Usuário',
+          email: u?.email || '',
+          phone: profile?.telefone || '',
+        };
+
+        await AsyncStorage.setItem(SAVED_USER_KEY, JSON.stringify(userData));
+        console.log('💾 Dados de exibição salvos:', userData);
+      } else {
+        console.log('❌ Sem user.id — nada foi salvo');
       }
-    ]);
+    } catch (e) {
+      console.error('Erro ao guardar sessão pra lembrar conta:', e);
+    }
+
+    // ⚠️ NÃO chama supabase.auth.signOut() aqui — qualquer scope revoga a
+    // sessão atual no servidor, o que mataria o próprio acesso que
+    // "Continuar como" precisa reaproveitar depois. Em vez disso, só liga
+    // a flag de logout visual; a sessão real do Supabase continua ativa e
+    // sendo renovada sozinha em background (autoRefreshToken: true).
+    await AsyncStorage.setItem(SOFT_LOGOUT_KEY, 'true');
+    console.log('👻 Soft-logout ativado — sessão real do Supabase continua viva');
+    emitAuthUiChange();
+    router.replace('/');
+  };
+
+  const handleForgetAccount = async () => {
+    setLogoutModalVisible(false);
+    // Sem scope = 'global' (padrão): revoga a sessão de verdade no servidor.
+    // Aqui é o logout de verdade, então isso é o comportamento certo.
+    await supabase.auth.signOut();
+    try {
+      await AsyncStorage.multiRemove([SAVED_USER_KEY, SOFT_LOGOUT_KEY]);
+    } catch (e) {
+      console.error('Erro ao limpar usuário local:', e);
+    }
+    emitAuthUiChange();
+    router.replace('/');
   };
 
   const getPaymentLabel = (method) => {
@@ -384,6 +449,14 @@ export default function Profile() {
         selectedCardId={selectedCardId}
         onSelectSimpleMethod={handleSelectSimpleMethod}
         onSelectCard={handleSelectCard}
+      />
+
+      {/* Modal de "lembrar conta" ao sair */}
+      <LogoutRememberModal
+        visible={logoutModalVisible}
+        onRemember={handleRememberAccount}
+        onForget={handleForgetAccount}
+        onRequestClose={() => setLogoutModalVisible(false)}
       />
     </View>
   );

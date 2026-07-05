@@ -11,6 +11,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { supabase } from '../supabaseConfig';
+import { getEffectiveSession, subscribeAuthUiChange } from '../utils/authSession';
 
 type EntrarBannerProps = {
   /** Nome exibido em "Explore mais com sua conta {appName}" */
@@ -34,18 +35,33 @@ export default function EntrarBanner({ appName = 'Batata Top', onPress }: Entrar
   const wasShowing = useRef(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-  // O banner é só pra quem não tá logado — escuta o auth do Supabase
-  // direto aqui, independente do Header, pra sumir assim que a sessão entrar.
+  // O banner é só pra quem não tá logado PRA UI — usa getEffectiveSession()
+  // (considera o soft-logout, ver utils/authSession.js) em vez de checar a
+  // sessão real do Supabase direto. Sem isso, o banner some quando "Sim,
+  // lembrar" está ativo (sessão real ainda viva) mesmo a UI devendo tratar
+  // como deslogado. Assina tanto onAuthStateChange (mudança real) quanto
+  // subscribeAuthUiChange (mudança só de flag, que não passa pelo evento
+  // do Supabase — ex: "Sim, lembrar" / "Continuar como").
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setIsLoggedIn(!!session?.user);
-    });
+    let mounted = true;
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setIsLoggedIn(!!session?.user);
-    });
+    async function refresh() {
+      const session = await getEffectiveSession();
+      if (mounted) setIsLoggedIn(!!session?.user);
+    }
 
-    return () => subscription.unsubscribe();
+    refresh();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      refresh();
+    });
+    const unsubscribeUi = subscribeAuthUiChange(refresh);
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+      unsubscribeUi();
+    };
   }, []);
 
   const qualifying = isQualifyingRoute(pathname);

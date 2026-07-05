@@ -4,11 +4,13 @@ import {
   ScrollView, Animated, Image, Easing,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useRef, useEffect, useCallback, useMemo, createContext, useContext } from 'react';
 
 import { useCart } from '../utils/cartStore';
 import { supabase } from '../supabaseConfig';
+import { getEffectiveSession, subscribeAuthUiChange, initAuthStateListener } from '../utils/authSession';
 import { configureNotificationAudio } from '../utils/notificationSound';
 import AdminPushRegistration from '../components/AdminPushRegistration';
 import EntrarBanner from '../components/EntrarBanner';
@@ -414,15 +416,11 @@ function Header({ onHeightChange, onRegisterReset }) {
 
   /* ---- Auth & endereço ---- */
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      const u = session?.user ?? null;
-      setUser(u);
-      setAuthResolved(true);
-      if (u) fetchDefaultAddress(u.id);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      const u = session?.user ?? null;
+    // Aplica o usuário resolvido (real ou soft-logout) no estado E na
+    // animação da linha de login/cadastro — usado tanto no refresh manual
+    // quanto no onAuthStateChange, pra não ter dois lugares com lógica
+    // diferente de "o que acontece quando o usuário vira null/não-null".
+    function applyUser(u) {
       setUser(u);
       if (u) {
         fetchDefaultAddress(u.id);
@@ -439,9 +437,38 @@ function Header({ onHeightChange, onRegisterReset }) {
           Animated.timing(authRowTranslateY, { toValue: 0, duration: 280, useNativeDriver: true }),
         ]).start();
       }
+    }
+
+    // Reconfere o estado "logado pra UI" — combina a sessão real do Supabase
+    // com a flag de soft-logout (ver utils/authSession.js). Usado tanto no
+    // mount quanto sempre que "Sim, lembrar" / "Continuar como" mudam a flag,
+    // já que essa mudança não passa por onAuthStateChange (a sessão real não
+    // muda nesse fluxo).
+    async function refreshEffectiveUser() {
+      const session = await getEffectiveSession();
+      applyUser(session?.user ?? null);
+      setAuthResolved(true);
+    }
+
+    // Liga o listener central que desliga o soft-logout sozinho sempre que
+    // um login real (SIGNED_IN) acontecer — ver utils/authSession.js.
+    initAuthStateListener();
+
+    refreshEffectiveUser();
+    const unsubscribeUi = subscribeAuthUiChange(refreshEffectiveUser);
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      // NÃO usar `session` direto aqui — a sessão real do Supabase se renova
+      // sozinha em background (autoRefreshToken: true) e dispara esse evento
+      // (ex: TOKEN_REFRESHED) mesmo com o soft-logout ligado. Aplicar direto
+      // pisaria no soft-logout. Reconfere via getEffectiveSession.
+      refreshEffectiveUser();
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      unsubscribeUi();
+    };
   }, []);
 
   async function fetchDefaultAddress(userId) {
@@ -653,7 +680,9 @@ function BottomTabBar() {
   const pathname = usePathname();
   const { setAnimation } = useNavContext();
 
-  if (pathname.includes('produto')) return null;
+  // Mesma regra que o Header já usa (isAuthPage) — a tab bar não deve
+  // aparecer em cima da tela de login/cadastro.
+  if (pathname.includes('produto') || pathname.includes('auth')) return null;
 
   const tabs = [
     { name: 'index',    label: 'Início',   icon: 'home',       iconOutline: 'home-outline' },
@@ -739,6 +768,7 @@ export default function RootLayout() {
   }, []);
 
   return (
+    <KeyboardProvider>
     <NavContext.Provider value={{ animation, setAnimation, lastRoute, setLastRoute }}>
     <ScrollYContext.Provider value={scrollCtxValue}>
     <HeaderHeightContext.Provider value={headerHeight}>
@@ -785,6 +815,7 @@ export default function RootLayout() {
     </HeaderHeightContext.Provider>
     </ScrollYContext.Provider>
     </NavContext.Provider>
+    </KeyboardProvider>
   );
 }
 

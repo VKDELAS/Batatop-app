@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { usePedidos } from './hooks/usePedidos';
 import { supabase } from '../supabaseConfig';
+import { getEffectiveSession, subscribeAuthUiChange } from '../utils/authSession';
 import { useScrollHandler, useHeaderHeight } from './_layout';
 import HelpModal from '../components/HelpModal';
 
@@ -295,21 +296,32 @@ export default function Pedidos() {
   // Ref estável ao userId — lido dentro dos callbacks do canal sem recriar o canal
   const userIdRef = useRef(null);
 
-  // Pega o usuário logado via Supabase Auth
+  // Pega o usuário logado via Supabase Auth — respeitando o soft-logout
+  // (ver utils/authSession.js): se o usuário clicou "Sim, lembrar" no perfil,
+  // a sessão real continua ativa, mas aqui deve contar como deslogado até
+  // ele confirmar em "Continuar como".
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      const uid = session?.user?.id ?? null;
-      setUserId(uid);
-      setAuthLoading(false);
-      // Fix: se não tiver sessão, não há fetchOrders pra baixar o loading —
-      // authLoading=false já é suficiente pra sair do spinner
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    async function refreshEffectiveUserId() {
+      const session = await getEffectiveSession();
       setUserId(session?.user?.id ?? null);
+      setAuthLoading(false);
+    }
+
+    refreshEffectiveUserId();
+    const unsubscribeUi = subscribeAuthUiChange(refreshEffectiveUserId);
+
+    // NÃO setar userId direto de `session` aqui — a sessão real do Supabase
+    // se renova sozinha em background (autoRefreshToken: true) e dispara
+    // esse evento (ex: TOKEN_REFRESHED) mesmo com o soft-logout ligado.
+    // Setar direto pisaria no soft-logout. Reconfere via getEffectiveSession.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      refreshEffectiveUserId();
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      unsubscribeUi();
+    };
   }, []);
 
   // Polling/realtime usam silent=true — não somem a FlatList durante refresh

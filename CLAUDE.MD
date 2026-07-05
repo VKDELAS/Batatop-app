@@ -61,6 +61,7 @@ batata-top/                          # App mobile (este repositório)
 ├── data/produtos.js                 # LEGADO — mock; produção usa Supabase
 ├── utils/
 │   ├── cartStore.js
+│   ├── authSession.js               # Soft-logout: ver seção 11
 │   ├── mercadoPago.js
 │   ├── usePaymentCards.ts
 │   ├── paymentPrefs.js
@@ -339,7 +340,173 @@ Se preferir não usar Vercel para push:
 
 ---
 
-## 10. Informações para Manutenção
+## 10. Padrão: Botão Fixo Acima do Teclado (react-native-keyboard-controller)
+
+Usado em `app/auth/login.js` no botão "Continuar" (footer fixo dos steps `email` e `name`). Documentado aqui porque o bug que resolve é sutil — reaplique esse padrão em qualquer outra tela que precise de um botão/footer que acompanha o teclado.
+
+### Histórico do bug (por que não dá pra resolver só com JS)
+
+Duas abordagens anteriores falharam, ambas pelo mesmo motivo raiz:
+
+1. **`KeyboardAvoidingView`**: esquecia o estado do teclado depois de um ciclo de `AppState` (app vai pra background e volta) — botão ficava grudado ou não subia.
+2. **`keyboardHeight` manual em `state` + eventos `Keyboard.addListener`**: resolvia o problema acima, mas Android soma esse offset em cima do próprio `adjustResize` da janela (que já reposiciona a tela sozinho), dobrando o deslocamento. E depois de background/foreground, o próprio `adjustResize` do Android pode simplesmente não redisparar — problema no nível do SO, não corrigível só em JS/React.
+
+**Conclusão:** qualquer abordagem baseada em resize de janela ou eventos JS do teclado é fundamentalmente frágil no Android depois de ciclos de background/foreground. A solução definitiva é ler o teclado direto do nível nativo.
+
+### A solução: `react-native-keyboard-controller`
+
+```
+npx expo install react-native-keyboard-controller
+```
+
+**1. `app/_layout.js`** — envolver a árvore inteira com `<KeyboardProvider>`, por fora de todos os outros providers:
+
+```jsx
+import { KeyboardProvider } from 'react-native-keyboard-controller';
+
+return (
+  <KeyboardProvider>
+    {/* NavContext, ScrollYContext, SafeAreaProvider, Stack, etc. */}
+  </KeyboardProvider>
+);
+```
+
+**2. `app.json`** — **NÃO** adicionar em `plugins`. Essa lib não tem `app.plugin.js`/config plugin; é só um módulo nativo autolinkado normalmente. Adicionar em `plugins` quebra o build (`PluginError: Unable to resolve a valid config plugin`).
+
+**3. Na tela** (`login.js`) — troca o `keyboardHeight` em state por `useReanimatedKeyboardAnimation`, que devolve um valor Reanimated sincronizado com o inset nativo do teclado a cada frame:
+
+```js
+import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+
+const { height: keyboardHeight } = useReanimatedKeyboardAnimation();
+const footerAnimatedStyle = useAnimatedStyle(() => ({
+  transform: [{ translateY: keyboardHeight.value }], // negativo quando o teclado abre
+}));
+```
+
+```jsx
+<Animated.View style={[styles.footerAvoider, footerAnimatedStyle]}>
+  <View style={styles.footer}>
+    {/* botão continuar */}
+  </View>
+</Animated.View>
+```
+
+```js
+// footerAvoider mantém bottom: 0 fixo — o translateY do Animated.View
+// que empurra pra cima quando o teclado abre.
+footerAvoider: {
+  position: 'absolute',
+  left: 0,
+  right: 0,
+  bottom: 0,
+},
+```
+
+Com isso, **remove completamente**: `useState(keyboardHeight)`, os `useEffect` com `Keyboard.addListener`, e o `useEffect` com `AppState.addEventListener` (blur manual dos inputs, dismiss forçado no resume). Nada disso é mais necessário — o hook nativo já é imune a ciclos de background/foreground.
+
+### Bug relacionado: `autoFocus` + transição de tela
+
+Sintoma: **na primeiríssima vez** que a tela abre (cold start / navegação), o cabeçalho aparece levemente deslocado — só nessa primeira vez.
+
+Causa: `autoFocus` abre o teclado **durante** a animação de entrada da tela (Expo Router). Correção: foco manual via `ref` com atraso.
+
+```js
+const emailRef = useRef(null);
+
+useEffect(() => {
+  if (step === 'email') {
+    const t = setTimeout(() => emailRef.current?.focus(), 300);
+    return () => clearTimeout(t);
+  }
+}, [step]);
+```
+
+```jsx
+<TextInput ref={emailRef} /* ...sem autoFocus... */ />
+```
+
+### Gotchas de build no Windows (ao instalar a lib e rebuildar)
+
+- **Caminho do projeto precisa ser curto.** O codegen C++ dessa lib gera nomes de arquivo longos; combinado com caminho de projeto tipo `C:\Users\...\Documents\Sites\App\batata-top`, estoura o limite de 260 caracteres do Windows (`ninja: error: Filename longer than 260 characters`). Mantenha o projeto em algo curto, ex. `C:\Dev\batata-top`.
+- **Depois de mover a pasta do projeto**, limpe caches antes de rebuildar — senão o Gradle falha com `No matching variant... No variants exist` pra **todos** os módulos nativos (resíduo de caminho absoluto antigo em cache):
+  ```powershell
+  cd android && .\gradlew --stop && cd ..
+  Remove-Item -Recurse -Force android\build, android\app\build, android\app\.cxx, android\.gradle, node_modules
+  npm install
+  npx expo prebuild --clean
+  npx expo run:android
+  ```
+
+### Checklist pra reaplicar esse padrão em outra tela
+
+- [ ] Nunca usar `KeyboardAvoidingView` nem `keyboardHeight` em `state`/`Keyboard.addListener` — usar `useReanimatedKeyboardAnimation`.
+- [ ] Footer como `Animated.View` com `transform: translateY(keyboardHeight.value)`, `bottom: 0` fixo no style base.
+- [ ] `<KeyboardProvider>` precisa envolver a árvore no `_layout.js` raiz (uma vez só, vale pro app inteiro).
+- [ ] `react-native-keyboard-controller` **não vai** em `plugins` do `app.json`.
+- [ ] Nunca usar `autoFocus` em campo que abre logo na entrada de uma tela via navegação — usar `ref` + `setTimeout` (~300ms).
+
+---
+
+## 11. Padrão: "Continuar como [nome]" / Soft-Logout
+
+Usado no fluxo "Sim, lembrar minha conta" (`app/profile.js`) + "Continuar como {nome}" (`components/AuthBottomSheet.tsx`, Estado B). Documentado aqui porque a causa raiz é contra-intuitiva e fácil de reintroduzir.
+
+### O bug original
+
+Sintoma: clicar em "Continuar como [nome]" sempre caía no fallback de login (`Invalid Refresh Token: Refresh Token Not Found`), mesmo testando poucos segundos depois do logout — não era expiração de token (refresh token do Supabase **não expira por tempo**, só é invalidado por uso ou revogação).
+
+Causa raiz real: **não existe scope de `supabase.auth.signOut()` que deixe a sessão atual viva no servidor.** `scope: 'global'` (padrão) revoga a sessão em *todos* os dispositivos; `scope: 'local'` revoga só a sessão atual — mas revoga. Não tem meio-termo. Um comentário antigo no código dizia que `'local'` "não revoga o token no servidor" — isso está **errado** (checar doc oficial antes de confiar nesse tipo de suposição de novo).
+
+Ou seja: qualquer `signOut()` chamado no momento do "Sim, lembrar" matava exatamente o refresh token que o app tentaria reusar depois. Reescrever a lógica de refresh/setSession não resolve — o problema é a premissa (guardar um refresh token de uma sessão que você mesmo acabou de revogar).
+
+### A solução: soft-logout (não existe logout de verdade aqui)
+
+`utils/authSession.js` centraliza:
+- `SOFT_LOGOUT_KEY` — flag local (`AsyncStorage`) que faz a UI **fingir** deslogado.
+- `getEffectiveSession()` — retorna `null` se a flag estiver ligada, senão retorna a sessão real do Supabase.
+- `subscribeAuthUiChange` / `emitAuthUiChange` — pub/sub em memória. Necessário porque ligar/desligar a flag **não** passa por `supabase.auth.onAuthStateChange` (a sessão real nunca muda nesse fluxo) — sem isso, telas que já estão montadas há tempo (o `_layout.js` raiz, que nunca desmonta) não saberiam que precisam reconferir o login.
+- `initAuthStateListener()` — chamada **uma vez** no `_layout.js` raiz. Escuta `SIGNED_IN` real (não importa por onde: e-mail, telefone, Google, etc.) e desliga `SOFT_LOGOUT_KEY` sozinha se estiver ligada. Sem isso, um login de verdade feito enquanto o soft-logout está ativo deixava a flag presa em `'true'` pra sempre, e telas que checam a flag antes de tudo (`profile.js`) continuavam mostrando deslogado mesmo com sessão nova e válida.
+
+**"Sim, lembrar" (`profile.js`, `handleRememberAccount`):** NÃO chama `signOut()`. Só salva `{name, email, phone}` (pra exibir "Continuar como [nome]") em `SAVED_USER_KEY`, liga `SOFT_LOGOUT_KEY`, emite `emitAuthUiChange()`. A sessão real do Supabase continua 100% viva e se renovando sozinha (`autoRefreshToken: true` em `supabaseConfig.js`).
+
+**"Continuar como" (`AuthBottomSheet.tsx`, `handleContinuarComo`):** só desliga `SOFT_LOGOUT_KEY`, emite o evento, confirma com `getEffectiveSession()`/`getSession()` que a sessão real ainda existe, navega. Sem `refreshSession`, sem `setSession` — não tem token nenhum pra restaurar porque nada foi destruído.
+
+**"Esquecer conta" (`profile.js`, `handleForgetAccount`):** esse sim é logout de verdade — `signOut()` padrão (`scope: 'global'`), limpa `SAVED_USER_KEY` **e** `SOFT_LOGOUT_KEY`.
+
+### Bug relacionado: `onAuthStateChange` pisando no soft-logout
+
+Sintoma: `profile.js` respeitava o soft-logout certinho, mas `pedidos.js`, `addresses.js` e `_layout.js` voltavam a mostrar "logado" sozinhos depois de um tempo, mesmo com `SOFT_LOGOUT_KEY` ligada — sem nenhuma ação do usuário.
+
+Causa raiz: essas telas tinham um segundo listener que setava o usuário **direto do `session` recebido no callback** do `onAuthStateChange`, ignorando a flag:
+
+```js
+// ERRADO — ignora o soft-logout
+supabase.auth.onAuthStateChange((_e, session) => setUser(session?.user ?? null));
+```
+
+A sessão real do Supabase se renova sozinha em background (`autoRefreshToken: true`), o que dispara `onAuthStateChange` (ex: evento `TOKEN_REFRESHED`) mesmo com o soft-logout ligado — e esse handler reaplicava a sessão real por cima. `profile.js` nunca teve esse listener direto (só reconfere a flag no `useFocusEffect`), por isso foi o único que ficou certo.
+
+**Correção:** o callback do `onAuthStateChange` nunca deve usar o `session` recebido pra decidir a UI — ele serve só de **gatilho** pra rechamar a função que passa por `getEffectiveSession()`:
+
+```js
+// CERTO — session do callback é só o gatilho, não a fonte de verdade
+const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+  refreshEffectiveUser(); // função que chama getEffectiveSession() internamente
+});
+```
+
+### Checklist pra qualquer tela nova que decide "logado ou não" pra UI
+
+- [ ] Nunca chamar `supabase.auth.getSession()` direto pra gate de UI — usar `getEffectiveSession()` de `utils/authSession.js`.
+- [ ] No `useEffect` de auth, assinar `subscribeAuthUiChange()` além de `onAuthStateChange` (e limpar os dois no cleanup).
+- [ ] **No callback do `onAuthStateChange`, nunca usar o `session` recebido pra setar o usuário/UI diretamente** — ele só deve disparar a função que rechama `getEffectiveSession()`. Setar direto do `session` do callback reaplica a sessão real por cima do soft-logout assim que o token se renova sozinho em background.
+- [ ] Já aplicado em: `app/_layout.js`, `app/profile.js`, `app/pedidos.js`, `app/addresses.js`, `components/AuthBottomSheet.tsx`, `components/EntrarBanner.tsx`.
+
+---
+
+## 12. Informações para Manutenção
 
 - **Design System:** `constants/theme.js` — nunca hardcodar cores/espaçamentos.
 - **Imagens:** `useProdutos.js` completa URL do bucket se `image_url` não começa com `http`.
@@ -420,4 +587,4 @@ Modo Homem das Cavernas
 'De gora em diante, remova palavras de preenchimento. Nada de enrolação. Resposta direta apenas. Use frases curtas de 3 a 6 palavras quando possível. Va direto ao resultado. Nao narre demais. Nao explique mais do que o necessário.
 
 
-Skill compactar:Quando eu disser 'COMPACTAR', resuma toda nossa conversa em 5 a 7 bullets com todo o contexto crítico, decisões e trechos essenciais. Formate de um jeito fácil de copiar e colar em um novo chat.
+Skill compactar:Quando eu disser 'COMPACTAR', resuma toda nossa conversa em 5 a 7 bullets com todo o contexto crítico, decisões e trechos essenciais. Formate de um jeito fácil de copiar e colar em um novo chat.  

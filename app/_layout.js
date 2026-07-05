@@ -11,6 +11,7 @@ import { useState, useRef, useEffect, useCallback, useMemo, createContext, useCo
 import { useCart } from '../utils/cartStore';
 import { supabase } from '../supabaseConfig';
 import { getEffectiveSession, subscribeAuthUiChange, initAuthStateListener } from '../utils/authSession';
+import { getPendingAddress, subscribePendingAddressChange, formatPendingAddressLabel } from '../utils/pendingAddress';
 import { configureNotificationAudio } from '../utils/notificationSound';
 import AdminPushRegistration from '../components/AdminPushRegistration';
 import EntrarBanner from '../components/EntrarBanner';
@@ -297,6 +298,10 @@ function Header({ onHeightChange, onRegisterReset }) {
   const authRowTranslateY = useRef(new Animated.Value(0)).current;
   const [authRowVisible, setAuthRowVisible] = useState(true);
   const addressNavLock = useRef(false);
+  // Ref porque o listener de endereço pendente (useEffect com deps [])
+  // precisa saber o `user` MAIS RECENTE, não o valor preso no momento em
+  // que o effect rodou (senão nunca reconferiria depois do primeiro render).
+  const userRef = useRef(null);
 
   /* ---- Animação de entrada + crossfade do endereço (estilo iFood) ---- */
   const greetingOpacity    = useRef(new Animated.Value(0)).current;
@@ -416,12 +421,24 @@ function Header({ onHeightChange, onRegisterReset }) {
 
   /* ---- Auth & endereço ---- */
   useEffect(() => {
+    // Endereço calculado sem login (ver utils/pendingAddress.js) — enquanto
+    // deslogado, o seletor do Header mostra ele em vez do texto padrão.
+    // Não aparece em lugar nenhum de app/addresses.js (decisão de produto);
+    // só some daqui quando um login de verdade acontece (flushPendingAddress
+    // já limpa a chave, e o applyUser abaixo busca o endereço real).
+    async function loadPendingAddressLabel() {
+      const pending = await getPendingAddress();
+      const label = formatPendingAddressLabel(pending);
+      animateAddressChange(label || 'Selecione seu endereço');
+    }
+
     // Aplica o usuário resolvido (real ou soft-logout) no estado E na
     // animação da linha de login/cadastro — usado tanto no refresh manual
     // quanto no onAuthStateChange, pra não ter dois lugares com lógica
     // diferente de "o que acontece quando o usuário vira null/não-null".
     function applyUser(u) {
       setUser(u);
+      userRef.current = u;
       if (u) {
         fetchDefaultAddress(u.id);
         Animated.parallel([
@@ -429,7 +446,7 @@ function Header({ onHeightChange, onRegisterReset }) {
           Animated.timing(authRowTranslateY,  { toValue: -12, duration: 220, useNativeDriver: true }),
         ]).start(() => setAuthRowVisible(false));
       } else {
-        animateAddressChange('Selecione seu endereço');
+        loadPendingAddressLabel();
         authRowTranslateY.setValue(-12);
         setAuthRowVisible(true);
         Animated.parallel([
@@ -456,6 +473,12 @@ function Header({ onHeightChange, onRegisterReset }) {
 
     refreshEffectiveUser();
     const unsubscribeUi = subscribeAuthUiChange(refreshEffectiveUser);
+    // Endereço pendente mudou (salvou/limpou) — só importa reconferir aqui
+    // se ainda tiver ninguém logado; se logar de verdade nesse meio tempo,
+    // quem manda é fetchDefaultAddress (endereço real), não o pendente.
+    const unsubscribePendingAddress = subscribePendingAddressChange(() => {
+      if (!userRef.current) loadPendingAddressLabel();
+    });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
       // NÃO usar `session` direto aqui — a sessão real do Supabase se renova
@@ -468,6 +491,7 @@ function Header({ onHeightChange, onRegisterReset }) {
     return () => {
       subscription.unsubscribe();
       unsubscribeUi();
+      unsubscribePendingAddress();
     };
   }, []);
 
@@ -530,7 +554,7 @@ function Header({ onHeightChange, onRegisterReset }) {
     }
   }, [isAddressPage, user, authResolved]);
 
-  if (isAuthPage || isProdutoPage || isCheckoutPage) return null;
+  if (isAuthPage || isProdutoPage || isCheckoutPage || isAddressPage) return null;
 
   return (
     <>
@@ -681,8 +705,9 @@ function BottomTabBar() {
   const { setAnimation } = useNavContext();
 
   // Mesma regra que o Header já usa (isAuthPage) — a tab bar não deve
-  // aparecer em cima da tela de login/cadastro.
-  if (pathname.includes('produto') || pathname.includes('auth')) return null;
+  // aparecer em cima da tela de login/cadastro nem da tela de endereços
+  // (que agora ocupa a tela inteira, estilo iFood).
+  if (pathname.includes('produto') || pathname.includes('auth') || pathname.includes('addresses')) return null;
 
   const tabs = [
     { name: 'index',    label: 'Início',   icon: 'home',       iconOutline: 'home-outline' },

@@ -13,14 +13,20 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, Platform, Modal, Animated } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapView, { Region } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme';
+import { COLORS, TYPOGRAPHY, SPACING, RADIUS } from '../constants/theme';
 import useGeolocationWithMaps from 'app/hooks/useGeolocationWithMaps';
 
 const CIDADE_PERMITIDA = 'Iacanga';
 const UF_PERMITIDA = 'SP';
+
+// Cor do pino "parado" (endereço reconhecido). Amarela, explícita — não usa
+// COLORS.secondary porque essa cor não corresponde ao amarelo da marca.
+const PIN_COLOR_SETTLED = '#FFB800';
+const PIN_COLOR_MOVING = '#9CA3AF';
 
 // Centro aproximado de Iacanga/SP — usado quando não há coords iniciais
 // (ex: usuário clicou direto em "Buscar pelo mapa" sem selecionar nada antes).
@@ -48,8 +54,33 @@ type MapSelectorProps = {
   onBack: () => void;
 };
 
+// Alerta temático — substitui o Alert.alert nativo (feio, fora do design
+// system) quando o pino fica fora de Iacanga/SP.
+function OutOfAreaModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={oa.overlay}>
+        <View style={oa.card}>
+          <View style={oa.iconWrap}>
+            <Ionicons name="location-outline" size={28} color={COLORS.secondary} />
+          </View>
+          <Text style={oa.title}>Fora da área de entrega</Text>
+          <Text style={oa.subtitle}>
+            Só entregamos em <Text style={{ fontWeight: '800', color: COLORS.text }}>{CIDADE_PERMITIDA}/{UF_PERMITIDA}</Text>.
+            Mova o mapa até essa região pra continuar.
+          </Text>
+          <Pressable style={oa.button} onPress={onClose}>
+            <Text style={oa.buttonText}>Entendi</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function MapSelector({ initialCoords, onBack, onConfirm }: MapSelectorProps) {
   const { geoLoading, error, reverseGeocodeDebounced } = useGeolocationWithMaps();
+  const insets = useSafeAreaInsets();
 
   const initialRegion: Region = initialCoords
     ? { ...DEFAULT_REGION, latitude: initialCoords.latitude, longitude: initialCoords.longitude }
@@ -57,12 +88,28 @@ export default function MapSelector({ initialCoords, onBack, onConfirm }: MapSel
 
   const [region, setRegion] = useState<Region>(initialRegion);
   const [centerAddress, setCenterAddress] = useState<any>(null);
+  const [showOutOfArea, setShowOutOfArea] = useState(false);
+  const [isMoving, setIsMoving] = useState(true); // true = pino levantado/cinza (ainda resolvendo)
   const mapRef = useRef<MapView>(null);
+
+  // moveAnim: 0 = parado (desceu, amarelo) · 1 = movendo (levantado, cinza)
+  const moveAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    Animated.timing(moveAnim, {
+      toValue: isMoving ? 1 : 0,
+      duration: 180,
+      useNativeDriver: true,
+    }).start();
+  }, [isMoving, moveAnim]);
+
+  const pinTranslateY = moveAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -10] });
+  const settledOpacity = moveAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
 
   // Reverse geo assim que a tela abre, pro endereço já aparecer sem precisar mexer no mapa.
   useEffect(() => {
     reverseGeocodeDebounced(initialRegion.latitude, initialRegion.longitude).then((r) => {
-      if (r) setCenterAddress(r);
+      if (r) { setCenterAddress(r); setIsMoving(false); }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -73,16 +120,25 @@ export default function MapSelector({ initialCoords, onBack, onConfirm }: MapSel
     (r: Region) => {
       setRegion(r);
       reverseGeocodeDebounced(r.latitude, r.longitude).then((res) => {
-        if (res) setCenterAddress(res);
+        if (res) { setCenterAddress(res); setIsMoving(false); }
       });
     },
     [reverseGeocodeDebounced]
   );
 
-  const isValid = !!centerAddress && centerAddress.isValidCity && !geoLoading;
+  // Assim que o dedo começa a arrastar o mapa, o pino já levanta e fica
+  // cinza — só volta a descer/amarelo quando o endereço for reconhecido
+  // (ver setIsMoving(false) acima, disparado pelo reverse geocode).
+  const handleRegionChange = useCallback(() => {
+    setIsMoving(true);
+  }, []);
 
   const handleConfirm = () => {
-    if (!centerAddress || !centerAddress.isValidCity) return;
+    if (geoLoading) return;
+    if (!centerAddress || !centerAddress.isValidCity) {
+      setShowOutOfArea(true);
+      return;
+    }
     onConfirm({
       street: centerAddress.street,
       neighborhood: centerAddress.neighborhood,
@@ -96,12 +152,12 @@ export default function MapSelector({ initialCoords, onBack, onConfirm }: MapSel
 
   return (
     <View style={st.wrap}>
-      <View style={st.header}>
+      <View style={[st.header, { paddingTop: insets.top + SPACING[3] }]} collapsable={false}>
         <Pressable style={st.backBtn} onPress={onBack}>
-          <Ionicons name="arrow-back" size={20} color={COLORS.primary} />
+          <Ionicons name="chevron-back" size={24} color={COLORS.primary} />
         </Pressable>
-        <Text style={st.headerTitle}>Ajuste o pino no mapa</Text>
-        <View style={{ width: 36 }} />
+        <Text style={st.headerTitle}>ENDEREÇO DE ENTREGA</Text>
+        <View style={{ width: 40 }} />
       </View>
 
       <View style={st.mapWrap}>
@@ -109,53 +165,62 @@ export default function MapSelector({ initialCoords, onBack, onConfirm }: MapSel
           ref={mapRef}
           style={StyleSheet.absoluteFillObject}
           initialRegion={initialRegion}
+          onRegionChange={handleRegionChange}
           onRegionChangeComplete={handleRegionChangeComplete}
           showsUserLocation
           showsMyLocationButton={false}
           showsCompass={false}
         />
 
-        {/* Pin fixo no centro da tela — o mapa que se move por baixo dele. */}
-        <View style={st.pinWrap} pointerEvents="none">
-          <Ionicons name="location" size={40} color={COLORS.secondary} />
+        {/* Sombra do pino — bolinha fixa no "chão", parada (não acompanha o
+            translateY do pino nem anima). */}
+        <View style={st.pinShadowWrap} pointerEvents="none">
           <View style={st.pinShadow} />
         </View>
-      </View>
 
-      <View style={st.footer}>
-        {geoLoading ? (
-          <View style={st.addressRow}>
+        {/* Pin fixo no centro da tela — o mapa que se move por baixo dele.
+            Levanta e fica cinza enquanto o endereço ainda não foi
+            reconhecido; desce e fica amarelo assim que o reverse geocode
+            resolve (cross-fade entre os dois ícones, sem depender de
+            Animated tentar interpolar a prop `color` do ícone). */}
+        <Animated.View
+          style={[st.pinWrap, { transform: [{ translateY: pinTranslateY }] }]}
+          pointerEvents="none"
+        >
+          <Animated.View style={{ opacity: settledOpacity }}>
+            <Ionicons name="location" size={44} color={PIN_COLOR_SETTLED} />
+          </Animated.View>
+          <Animated.View style={[StyleSheet.absoluteFill, { alignItems: 'center', opacity: moveAnim }]}>
+            <Ionicons name="location" size={44} color={PIN_COLOR_MOVING} />
+          </Animated.View>
+        </Animated.View>
+
+        {geoLoading && (
+          <View style={st.loadingPill}>
             <ActivityIndicator size="small" color={COLORS.primary} />
-            <Text style={st.addressLoading}>Identificando endereço...</Text>
           </View>
-        ) : centerAddress ? (
-          <>
-            <Text style={st.addressLine1} numberOfLines={1}>
-              {centerAddress.street || 'Rua não identificada'}
-            </Text>
-            <Text style={st.addressLine2} numberOfLines={1}>
-              {centerAddress.city || '—'}, {centerAddress.state || '—'}
-            </Text>
-            {!centerAddress.isValidCity && (
-              <Text style={st.cityWarning}>
-                🚫 Só entregamos em {CIDADE_PERMITIDA}/{UF_PERMITIDA}. Mova o mapa pra essa região.
-              </Text>
-            )}
-          </>
-        ) : (
-          <Text style={st.addressLine2}>Mova o mapa pra selecionar um ponto.</Text>
         )}
 
-        {!!error && <Text style={st.errorText}>{error}</Text>}
-
-        <Pressable
-          style={[st.confirmBtn, !isValid && st.confirmBtnDisabled]}
-          onPress={handleConfirm}
-          disabled={!isValid}
-        >
-          <Text style={[st.confirmText, !isValid && st.confirmTextDisabled]}>Continuar</Text>
-        </Pressable>
+        {!!error && (
+          <View style={st.errorPill}>
+            <Text style={st.errorPillText}>{error}</Text>
+          </View>
+        )}
       </View>
+
+      {/* Botão único, flutuante — sem cartão/rodapé embaixo dele. */}
+      <Pressable
+        style={[st.confirmFloating, geoLoading && st.confirmFloatingDisabled]}
+        onPress={handleConfirm}
+        disabled={geoLoading}
+      >
+        {geoLoading
+          ? <ActivityIndicator color="#fff" />
+          : <Text style={st.confirmFloatingText}>Confirmar endereço de entrega</Text>
+        }
+      </Pressable>
+
+      <OutOfAreaModal visible={showOutOfArea} onClose={() => setShowOutOfArea(false)} />
     </View>
   );
 }
@@ -167,62 +232,96 @@ const st = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: SPACING[5],
-    paddingTop: Platform.OS === 'ios' ? 54 : 24,
-    paddingBottom: SPACING[3],
+    paddingBottom: SPACING[4],
     backgroundColor: COLORS.background,
+    borderBottomLeftRadius: RADIUS.xl,
+    borderBottomRightRadius: RADIUS.xl,
+    zIndex: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 8,
   },
   backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: COLORS.primary + '15',
-    borderWidth: 1.5,
-    borderColor: COLORS.primary + '40',
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerTitle: { color: COLORS.text, fontWeight: '800', fontSize: TYPOGRAPHY.sizes.base },
+  headerTitle: { color: COLORS.text, fontWeight: '800', fontSize: 13, letterSpacing: 0.6 },
   mapWrap: { flex: 1, position: 'relative' },
+
+  // Pino fixo no centro + anel de precisão (bolha azul embaixo da ponta,
+  // estilo Uber/iFood) — puramente decorativo, o ponto real é o centro do mapa.
   pinWrap: {
     position: 'absolute',
     top: '50%',
     left: '50%',
-    marginLeft: -20,
-    marginTop: -40,
+    marginLeft: -22,
+    marginTop: -44,
     alignItems: 'center',
   },
+  pinShadowWrap: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    marginLeft: -10,
+    marginTop: -13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   pinShadow: {
-    width: 8,
-    height: 4,
-    borderRadius: 4,
-    backgroundColor: 'rgba(0,0,0,0.25)',
-    marginTop: -2,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#000',
+    opacity: 0.3,
+    transform: [{ scaleY: 0.35 }],
   },
-  footer: {
-    padding: SPACING[5],
-    backgroundColor: COLORS.background,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    gap: SPACING[2],
-    ...SHADOWS.md,
+
+  loadingPill: {
+    position: 'absolute', top: SPACING[4], alignSelf: 'center',
+    backgroundColor: '#fff', borderRadius: 20, padding: SPACING[3],
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 6, elevation: 4,
   },
-  addressRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING[2] },
-  addressLoading: { color: COLORS.textMuted, fontSize: TYPOGRAPHY.sizes.sm },
-  addressLine1: { color: COLORS.text, fontWeight: '700', fontSize: TYPOGRAPHY.sizes.sm },
-  addressLine2: { color: COLORS.textSecondary, fontSize: TYPOGRAPHY.sizes.xs },
-  cityWarning: { color: '#EF4444', fontSize: 12, fontWeight: '600', marginTop: 4 },
-  errorText: { color: '#EF4444', fontSize: 12 },
-  confirmBtn: {
-    height: 48,
+  errorPill: {
+    position: 'absolute', top: SPACING[4], left: SPACING[5], right: SPACING[5],
+    backgroundColor: '#fff', borderRadius: RADIUS.lg, padding: SPACING[3],
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 6, elevation: 4,
+  },
+  errorPillText: { color: '#EF4444', fontSize: 12, fontWeight: '600', textAlign: 'center' },
+
+  // Botão flutuante — sem cartão/footer atrás dele, só ele mesmo sobre o mapa.
+  confirmFloating: {
+    position: 'absolute',
+    left: SPACING[5],
+    right: SPACING[5],
+    bottom: Platform.OS === 'ios' ? 40 : 24,
+    height: 52,
     backgroundColor: COLORS.primary,
     borderRadius: RADIUS.lg,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: SPACING[2],
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 6,
   },
-  confirmBtnDisabled: { backgroundColor: '#CCCCCC' },
-  confirmText: { color: '#fff', fontWeight: '800', fontSize: TYPOGRAPHY.sizes.sm },
-  confirmTextDisabled: { color: '#888888' },
+  confirmFloatingDisabled: { opacity: 0.7 },
+  confirmFloatingText: { color: '#fff', fontWeight: '800', fontSize: TYPOGRAPHY.sizes.sm },
+});
+
+// Estilos OutOfAreaModal (alerta temático)
+const oa = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: SPACING[6] },
+  card: { width: '100%', backgroundColor: COLORS.background, borderRadius: RADIUS.xl, padding: SPACING[6], alignItems: 'center' },
+  iconWrap: { width: 56, height: 56, borderRadius: 28, backgroundColor: COLORS.secondary + '15', alignItems: 'center', justifyContent: 'center', marginBottom: SPACING[4] },
+  title: { color: COLORS.text, fontWeight: '800', fontSize: TYPOGRAPHY.sizes.lg, marginBottom: SPACING[2], textAlign: 'center' },
+  subtitle: { color: COLORS.textSecondary, fontSize: TYPOGRAPHY.sizes.sm, textAlign: 'center', lineHeight: 20, marginBottom: SPACING[5] },
+  button: { width: '100%', height: 48, backgroundColor: COLORS.primary, borderRadius: RADIUS.lg, alignItems: 'center', justifyContent: 'center' },
+  buttonText: { color: '#fff', fontWeight: '800', fontSize: TYPOGRAPHY.sizes.sm },
 });
 
 /**

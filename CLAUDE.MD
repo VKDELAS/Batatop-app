@@ -506,7 +506,22 @@ const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
 
 ---
 
-## 12. Informações para Manutenção
+## 12. Alertas — sempre `ThemedAlert`, nunca `Alert.alert`
+
+Nunca usar o `Alert.alert` nativo do `react-native` (alerta cinza do sistema, foge do visual do app). Sempre usar `components/ThemedAlert.js`:
+
+```js
+import { ThemedAlertHost, showThemedAlert } from '../components/ThemedAlert';
+```
+
+- **`showThemedAlert(title, message, buttons?)`** — mesma assinatura do `Alert.alert` (`buttons` aceita `style: 'cancel' | 'destructive'`), é só trocar o nome da chamada.
+- **`<ThemedAlertHost />`** precisa estar montado na árvore de qualquer tela que chame `showThemedAlert` (é ele quem renderiza o modal — sem ele montado, a chamada só loga um warning e não mostra nada). Padrão singleton: uma vez montado num ponto da árvore, `showThemedAlert` funciona de qualquer componente/arquivo, mesmo sem prop-drilling.
+- Se a tela tem mais de um `return` (branches tipo `screen === 'x' ? <A/> : <B/>` retornando cedo), o Host precisa estar em **cada** branch que pode disparar alerta — já aplicado assim em `app/addresses.js`.
+- Já aplicado em: `app/addresses.js`.
+
+---
+
+## 13. Informações para Manutenção
 
 - **Design System:** `constants/theme.js` — nunca hardcodar cores/espaçamentos.
 - **Imagens:** `useProdutos.js` completa URL do bucket se `image_url` não começa com `http`.
@@ -587,4 +602,4 @@ Modo Homem das Cavernas
 'De gora em diante, remova palavras de preenchimento. Nada de enrolação. Resposta direta apenas. Use frases curtas de 3 a 6 palavras quando possível. Va direto ao resultado. Nao narre demais. Nao explique mais do que o necessário.
 
 
-Skill compactar:Quando eu disser 'COMPACTAR', resuma toda nossa conversa em 5 a 7 bullets com todo o contexto crítico, decisões e trechos essenciais. Formate de um jeito fácil de copiar e colar em um novo chat.  
+Skill compactar:Quando eu disser 'COMPACTAR', resuma toda nossa conversa em 5 a 7 bullets com todo o contexto crítico, decisões e trechos essenciais. Formate de um jeito fácil de copiar e colar em um novo chat.

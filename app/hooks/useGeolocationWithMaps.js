@@ -18,25 +18,40 @@ const CIDADE_PERMITIDA = 'Iacanga';
 const UF_PERMITIDA = 'SP';
 const REVERSE_GEO_DEBOUNCE_MS = 400;
 
-// Nominatim exige um identificador da aplicação no header (política de uso).
-// Troque 'batatatop-app' por algo que identifique seu app se quiser.
+// Nominatim exige um jeito de identificar a aplicação (política de uso:
+// https://operations.osmfoundation.org/policies/nominatim/) — SEM isso o
+// servidor rejeita a request com 403, sempre, não importa o lugar. Era
+// exatamente esse o bug: o comentário avisava, mas o header de verdade
+// nunca tinha sido adicionado — só tinha o Accept-Language.
+// TROQUE o e-mail abaixo pelo seu (ou outro contato válido do app).
+const NOMINATIM_CONTACT = 'contato@batatatop.com.br';
 const NOMINATIM_HEADERS = {
   'Accept-Language': 'pt-BR',
+  'User-Agent': `BatataTopApp/1.0 (${NOMINATIM_CONTACT})`,
 };
 
 async function fetchReverseGeocode(lat, lng) {
-  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
+  // `email=` é o outro jeito (além do User-Agent) que a política do
+  // Nominatim aceita pra identificar a aplicação — manda os dois por
+  // garantia, já que User-Agent customizado às vezes não sobrevive em
+  // todo ambiente/proxy do dispositivo.
+  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&email=${encodeURIComponent(NOMINATIM_CONTACT)}`;
   const res = await fetch(url, { headers: NOMINATIM_HEADERS });
-  if (!res.ok) throw new Error('Falha no reverse geocoding');
+  if (!res.ok) throw new Error(`Falha no reverse geocoding (HTTP ${res.status})`);
   const data = await res.json();
   const addr = data.address || {};
 
   const street = addr.road || addr.pedestrian || addr.residential || '';
   const neighborhood = addr.suburb || addr.neighbourhood || addr.village || '';
   const city = addr.city || addr.town || addr.municipality || '';
-  const state = addr.state
-    ? (addr['ISO3166-2-lvl4'] ? addr['ISO3166-2-lvl4'].split('-')[1] : addr.state.slice(0, 2).toUpperCase())
-    : '';
+  const stateName = addr.state || '';
+  // Fallback específico pro seu caso (só SP é válido mesmo): o slice(0,2)
+  // antigo pegava os 2 primeiros caracteres de "São Paulo" → "SÃ", nunca
+  // batia com UF_PERMITIDA. addr['ISO3166-2-lvl4'] (ex: "BR-SP") é o
+  // caminho normal; isso aqui só cobre o caso raro de vir sem ele.
+  const state = addr['ISO3166-2-lvl4']
+    ? addr['ISO3166-2-lvl4'].split('-')[1]
+    : (stateName.toLowerCase().includes('paulo') ? 'SP' : '');
 
   return {
     formatted: data.display_name || '',
@@ -116,14 +131,18 @@ export default function useGeolocationWithMaps() {
       const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
       setLocation(coords);
 
+      // Devolve o address resolvido aqui mesmo pra quem chamou getLocation()
+      // já receber o resultado pronto (sem closure velha em cima do state
+      // `address`, que só atualiza no próximo render).
+      let result = null;
       try {
-        const result = await fetchReverseGeocode(coords.latitude, coords.longitude);
+        result = await fetchReverseGeocode(coords.latitude, coords.longitude);
         setAddress(result);
       } catch {
         setError('Localização obtida, mas não foi possível identificar o endereço.');
       }
 
-      return coords;
+      return { coords, address: result };
     } catch {
       setError('Não foi possível obter sua localização. Verifique se o GPS está ligado.');
       return null;

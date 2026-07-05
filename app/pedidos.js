@@ -1,6 +1,7 @@
 import {
   View,
   Text,
+  Image,
   ScrollView,
   FlatList,
   StyleSheet,
@@ -20,6 +21,7 @@ import { supabase } from '../supabaseConfig';
 import { getEffectiveSession, subscribeAuthUiChange } from '../utils/authSession';
 import { useScrollHandler, useHeaderHeight } from './_layout';
 import HelpModal from '../components/HelpModal';
+import batataDormindo from '../assets/batatadormindo.png';
 
 // ─── Constantes de status ────────────────────────────────────────────────────
 
@@ -425,47 +427,15 @@ export default function Pedidos() {
 
   if (!userId) {
     return (
-      <View style={ag.wrap}>
-        {/* Ícone */}
-        <View style={ag.iconWrap}>
-          <View style={ag.iconCircle}>
-            <Ionicons name="receipt-outline" size={34} color={COLORS.primary} />
-          </View>
-          <View style={ag.lockBadge}>
-            <Ionicons name="lock-closed" size={11} color="#fff" />
-          </View>
-        </View>
-
-        <Text style={ag.title}>Meus Pedidos</Text>
-        <Text style={ag.sub}>
-          Para visualizar seus pedidos você precisa estar logado.
+      <View style={es.wrap}>
+        <Image source={batataDormindo} style={es.image} resizeMode="contain" />
+        <Text style={es.title}>Poxa, você não tem nenhum pedido</Text>
+        <Text style={es.sub}>
+          Seus pedidos vão aparecer aqui quando você fizer. Que tal aproveitar as ofertas pra pedir agora?
         </Text>
-
-        {/* Aviso amarelo */}
-        <View style={ag.warnBanner}>
-          <Ionicons name="information-circle" size={15} color={COLORS.primary} />
-          <Text style={ag.warnText}>
-            Não é possível ver pedidos sem uma conta ativa.
-          </Text>
-        </View>
-
-        {/* Entrar */}
-        <Pressable style={ag.btnPrimary} onPress={() => router.push('/auth/login')}>
-          <View style={ag.btnInner}>
-            <Text style={ag.btnPrimaryText}>Entrar na conta</Text>
-            <Ionicons name="arrow-forward" size={15} color="#fff" />
-          </View>
+        <Pressable onPress={() => router.push('/')} hitSlop={8}>
+          <Text style={es.ctaText}>Fazer pedido</Text>
         </Pressable>
-
-        {/* Criar conta */}
-        <Pressable style={ag.btnSecondary} onPress={() => router.push('/auth/register')}>
-          <View style={ag.btnInner}>
-            <Ionicons name="person-add-outline" size={15} color={COLORS.primary} />
-            <Text style={ag.btnSecondaryText}>Criar conta</Text>
-          </View>
-        </Pressable>
-
-        <Text style={ag.footer}>Rápido, gratuito e seus dados ficam seguros.</Text>
       </View>
     );
   }
@@ -473,20 +443,12 @@ export default function Pedidos() {
   // ── Empty state ─────────────────────────────────────────────────────────────
   if (!initialLoading && orders.length === 0) {
     return (
-      <View style={s.container}>
-        <View style={s.header}>
-          <Text style={s.title}>Meus Pedidos</Text>
-        </View>
-        <View style={s.centered}>
-          <View style={s.emptyIconBox}>
-            <Ionicons name="bag-outline" size={56} color={COLORS.primary} style={{ opacity: 0.3 }} />
-          </View>
-          <Text style={s.emptyTitle}>Você ainda não pediu nada</Text>
-          <Text style={s.emptySub}>Que tal experimentar uma Batatop hoje?</Text>
-          <Pressable style={s.ctaBtn} onPress={() => router.push('/cardapio')}>
-            <Text style={s.ctaBtnText}>Ver Cardápio</Text>
-          </Pressable>
-        </View>
+      <View style={es.wrap}>
+        <Image source={batataDormindo} style={es.image} resizeMode="contain" />
+        <Text style={es.title}>Seus pedidos vão aparecer aqui</Text>
+        <Text style={es.sub}>
+          Aqui você pode consultar pedidos em andamento, seu histórico e adicionar um pedido antigo à sacola
+        </Text>
       </View>
     );
   }
@@ -699,38 +661,11 @@ const s = StyleSheet.create({
     paddingBottom: SPACING[8] ?? 32,
     gap: SPACING[4] ?? 16,
   },
-  emptyIconBox: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: '#FEF9C3',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: SPACING[2] ?? 8,
-  },
   emptyTitle: {
     fontSize: TYPOGRAPHY.sizes.lg ?? 18,
     fontWeight: '800',
     color: COLORS.text ?? '#111',
     textAlign: 'center',
-  },
-  emptySub: {
-    fontSize: TYPOGRAPHY.sizes.sm ?? 14,
-    color: COLORS.textSecondary ?? '#666',
-    textAlign: 'center',
-  },
-  ctaBtn: {
-    marginTop: SPACING[4] ?? 16,
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: SPACING[8] ?? 32,
-    paddingVertical: SPACING[4] ?? 16,
-    borderRadius: RADIUS.xl ?? 16,
-    ...SHADOWS?.md,
-  },
-  ctaBtnText: {
-    color: '#FFF',
-    fontWeight: '800',
-    fontSize: TYPOGRAPHY.sizes.base ?? 16,
   },
   loadingText: {
     marginTop: SPACING[3] ?? 12,
@@ -990,79 +925,39 @@ const filter = StyleSheet.create({
   },
 });
 
-// ─── Estilos — AuthGate (não logado) ─────────────────────────────────────────
-const ag = StyleSheet.create({
+// ─── Estilos — Empty states (deslogado / logado sem pedidos) ─────────────────
+// Layout compartilhado pelas Images 1 e 2 do design: ilustração + título +
+// descrição, com o CTA "Fazer pedido" aparecendo só no estado deslogado.
+const es = StyleSheet.create({
   wrap: {
     flex: 1,
-    backgroundColor: COLORS.backgroundElevated ?? '#F5F5F5',
+    backgroundColor: COLORS.background ?? '#FFF',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: SPACING[8] ?? 32,
-    gap: SPACING[3] ?? 12,
+    paddingHorizontal: SPACING[6] ?? 24,
   },
-  iconWrap: { position: 'relative', marginBottom: SPACING[4] ?? 16 },
-  iconCircle: {
-    width: 80, height: 80, borderRadius: 40,
-    backgroundColor: (COLORS.primary ?? '#FFB800') + '18',
-    borderWidth: 2, borderColor: (COLORS.primary ?? '#FFB800') + '40',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  lockBadge: {
-    position: 'absolute', bottom: 0, right: 0,
-    width: 24, height: 24, borderRadius: 12,
-    backgroundColor: COLORS.primary ?? '#FFB800',
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: COLORS.backgroundElevated ?? '#F5F5F5',
+  image: {
+    width: 200,
+    height: 200,
+    marginBottom: SPACING[6] ?? 24,
   },
   title: {
-    color: COLORS.text ?? '#111', fontWeight: '800',
-    fontSize: 24, letterSpacing: -0.5, textAlign: 'center',
+    fontSize: TYPOGRAPHY.sizes.lg ?? 18,
+    fontWeight: '800',
+    color: COLORS.text ?? '#1A1A1A',
+    textAlign: 'center',
   },
   sub: {
-    color: COLORS.textSecondary ?? '#666',
     fontSize: TYPOGRAPHY.sizes.sm ?? 14,
-    textAlign: 'center', lineHeight: 21,
-    marginBottom: SPACING[2] ?? 8,
+    color: COLORS.textSecondary ?? '#666',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginTop: SPACING[2] ?? 8,
   },
-  warnBanner: {
-    flexDirection: 'row', gap: SPACING[2] ?? 8,
-    backgroundColor: (COLORS.primary ?? '#FFB800') + '15',
-    borderRadius: RADIUS.lg ?? 12, borderWidth: 1,
-    borderColor: (COLORS.primary ?? '#FFB800') + '35',
-    padding: SPACING[4] ?? 16, width: '100%',
-    marginBottom: SPACING[2] ?? 8,
-  },
-  warnText: {
-    flex: 1, color: COLORS.primary ?? '#FFB800',
-    fontSize: 12, lineHeight: 17, fontWeight: '600',
-  },
-  btnPrimary: {
-    backgroundColor: COLORS.primary ?? '#FFB800',
-    borderRadius: RADIUS.lg ?? 12,
-    paddingVertical: SPACING[4] ?? 16,
-    width: '100%', overflow: 'hidden',
-  },
-  btnInner: {
-    flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'center', gap: SPACING[2] ?? 8,
-  },
-  btnPrimaryText: {
-    color: '#fff', fontWeight: '800',
+  ctaText: {
     fontSize: TYPOGRAPHY.sizes.base ?? 16,
-  },
-  btnSecondary: {
-    borderRadius: RADIUS.lg ?? 12,
-    paddingVertical: SPACING[4] ?? 16,
-    width: '100%', borderWidth: 1.5,
-    borderColor: COLORS.primary ?? '#FFB800',
-    overflow: 'hidden',
-  },
-  btnSecondaryText: {
-    color: COLORS.primary ?? '#FFB800', fontWeight: '700',
-    fontSize: TYPOGRAPHY.sizes.base ?? 16,
-  },
-  footer: {
-    color: COLORS.textMuted ?? '#999', fontSize: 11,
-    textAlign: 'center', marginTop: SPACING[4] ?? 16,
+    fontWeight: '700',
+    color: COLORS.primary,
+    marginTop: SPACING[5] ?? 20,
   },
 });

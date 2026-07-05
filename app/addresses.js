@@ -681,7 +681,7 @@ function LoggedInAddressesList({
         onPress={onUseCurrentLocation}
         disabled={requestingGeo}
       >
-        <Ionicons name="locate-outline" size={20} color={COLORS.textSecondary} />
+        <Ionicons name="locate-outline" size={28} color={COLORS.textSecondary} />
         <View style={{ flex: 1 }}>
           <Text style={la.locationRowTitle}>Usar localização atual</Text>
           {requestingGeo ? (
@@ -1176,7 +1176,7 @@ export default function Addresses() {
             onPress={handleUseCurrentLocation}
             disabled={requestingGeo}
           >
-            <Ionicons name="locate-outline" size={20} color={COLORS.textSecondary} />
+            <Ionicons name="locate-outline" size={24} color={COLORS.textSecondary} />
             <View style={{ flex: 1 }}>
               <Text style={s.locationRowTitle}>Usar localização atual</Text>
               {requestingGeo ? (
@@ -1378,8 +1378,8 @@ const s = StyleSheet.create({
   entryTitle: { color: COLORS.text, fontWeight: '800', fontSize: 22, lineHeight: 28, textAlign: 'center', letterSpacing: -0.3, marginBottom: SPACING[5] },
   searchFakeInput: { flexDirection: 'row', alignItems: 'center', gap: SPACING[2], backgroundColor: COLORS.backgroundElevated, borderRadius: RADIUS.md, paddingHorizontal: SPACING[4], paddingVertical: SPACING[4], marginBottom: SPACING[4] },
   searchFakeInputText: { color: COLORS.textMuted, fontSize: TYPOGRAPHY.sizes.sm },
-  locationRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING[3], paddingHorizontal: SPACING[4], paddingVertical: SPACING[2] },
-  locationRowTitle: { color: COLORS.text, fontWeight: '700', fontSize: TYPOGRAPHY.sizes.sm },
+  locationRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING[3], paddingHorizontal: SPACING[4], paddingVertical: SPACING[3] },
+  locationRowTitle: { color: COLORS.text, fontWeight: '700', fontSize: TYPOGRAPHY.sizes.base },
   locationRowSub: { color: COLORS.textMuted, fontSize: 12, marginTop: 2 },
   locationRowActivate: { color: COLORS.textSecondary, fontWeight: '700', fontSize: 12, marginTop: 2 },
   locationDivider: { height: StyleSheet.hairlineWidth, backgroundColor: COLORS.border, marginHorizontal: SPACING[4], marginTop: SPACING[2] },
@@ -1406,10 +1406,10 @@ const la = StyleSheet.create({
   searchBarText: { color: COLORS.textMuted, fontSize: TYPOGRAPHY.sizes.sm },
   grayArea: { flex: 1, backgroundColor: COLORS.backgroundElevated },
   grayAreaContent: { paddingHorizontal: SPACING[5], paddingTop: SPACING[4], paddingBottom: SPACING[8] },
-  locationRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING[3], paddingHorizontal: SPACING[5], paddingBottom: SPACING[3] },
-  locationRowTitle: { color: COLORS.text, fontWeight: '700', fontSize: TYPOGRAPHY.sizes.sm },
-  locationRowSub: { color: COLORS.textMuted, fontSize: 12, marginTop: 2 },
-  locationRowActivate: { color: COLORS.textSecondary, fontWeight: '700', fontSize: 12 },
+  locationRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING[3], paddingHorizontal: SPACING[5], paddingTop: SPACING[2], paddingBottom: SPACING[5] },
+  locationRowTitle: { color: COLORS.text, fontWeight: '700', fontSize: TYPOGRAPHY.sizes.base },
+  locationRowSub: { color: COLORS.textMuted, fontSize: 13, marginTop: 3 },
+  locationRowActivate: { color: COLORS.textSecondary, fontWeight: '700', fontSize: 13 },
 });
 
 // Estilos MapBackdrop (ilustração decorativa do Estado A)

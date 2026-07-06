@@ -8,7 +8,7 @@ import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme
 import { useScrollHandler, useHeaderHeight } from './_layout';
 import { getPreferredPaymentMethod, setPreferredPaymentMethod, getPreferredCardId, setPreferredCardId } from '../utils/paymentPrefs';
 import { formatCardDisplay } from '../utils/usePaymentCards';
-import { SOFT_LOGOUT_KEY, emitAuthUiChange } from '../utils/authSession';
+import { SOFT_LOGOUT_KEY, emitAuthUiChange, getEffectiveSession } from '../utils/authSession';
 import PaymentMethodModal from '../components/PaymentMethodModal';
 import LogoutRememberModal from '../components/LogoutRememberModal';
 
@@ -38,17 +38,9 @@ export default function Profile() {
 
   async function checkUser() {
     try {
-      // Se o usuário escolheu "Sim, lembrar" antes, a sessão real do Supabase
-      // continua válida (não foi revogada), mas a UI precisa fingir
-      // deslogado até ele confirmar em "Continuar como [nome]".
-      const softLoggedOut = (await AsyncStorage.getItem(SOFT_LOGOUT_KEY)) === 'true';
-      if (softLoggedOut) {
-        console.log('👻 Soft-logout ativo — tratando como deslogado na UI');
-        setUser(null);
-        return;
-      }
-
-      const { data: { session } } = await supabase.auth.getSession();
+      // getEffectiveSession() já cobre a checagem do soft-logout — retorna
+      // null se a flag estiver ligada, mesmo com a sessão real ativa.
+      const session = await getEffectiveSession();
       const u = session?.user || null;
       setUser(u);
 

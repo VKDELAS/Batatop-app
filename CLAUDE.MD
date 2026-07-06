@@ -497,11 +497,52 @@ const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
 });
 ```
 
+### Bug relacionado: `SIGNED_IN` falso na reidratação de sessão (cold start) — `utils/authSession.js`
+
+Sintoma: usuário clica em "Sim, lembrar", fecha o app de vez (mata o processo) e abre de novo — esperava ver a tela deslogada e precisar clicar em "Continuar como [nome]", mas o app já abre logado sozinho, sem nenhuma ação.
+
+Causa raiz: `initAuthStateListener()` (chamado uma vez no `_layout.js` raiz) escuta `SIGNED_IN` pra desligar `SOFT_LOGOUT_KEY` quando um login de verdade acontece (ver acima). O problema é que o evento `SIGNED_IN` **não dispara só em login interativo real** — o Supabase também reporta `SIGNED_IN` quando reidrata a sessão persistida do `AsyncStorage` ao iniciar o app, mesmo que o usuário não tenha feito nada. Esse é o **primeiro** evento que o listener recebe depois de assinar `onAuthStateChange`.
+
+Sem tratar isso, todo cold-start com o soft-logout ligado disparava esse `SIGNED_IN` de reidratação, o listener achava que era um login de verdade, desligava a flag sozinho, e a pessoa aparecia logada de novo sem nunca ter tocado em "Continuar como".
+
+**Correção:** ignorar explicitamente o primeiro evento recebido depois de assinar o listener — ele é sempre a reidratação/estado atual, nunca uma transição real:
+
+```js
+export function initAuthStateListener() {
+  if (listenerInitialized) return;
+  listenerInitialized = true;
+
+  // O primeiro evento após assinar é sempre a reidratação da sessão do
+  // AsyncStorage no cold start, não um login real — precisa ser ignorado.
+  let isInitialEvent = true;
+
+  supabase.auth.onAuthStateChange(async (event, session) => {
+    if (isInitialEvent) {
+      isInitialEvent = false;
+      return;
+    }
+
+    if (event === 'SIGNED_IN' && session) {
+      const soft = await AsyncStorage.getItem(SOFT_LOGOUT_KEY);
+      if (soft === 'true') {
+        await AsyncStorage.setItem(SOFT_LOGOUT_KEY, 'false');
+        emitAuthUiChange();
+      }
+    }
+  });
+}
+```
+
+Comportamento esperado depois do fix:
+- **Saiu do app logado (sem soft-logout ativo):** abre logado de novo — `getEffectiveSession()` não depende desse listener, só olha a flag + sessão real.
+- **Saiu do app com soft-logout ativo ("Sim, lembrar"):** abre deslogado — só volta a logar quando a pessoa toca em "Continuar como [nome]" de propósito, ou faz um login de verdade digitando credencial (esse sim chega **depois** do evento inicial, não é bloqueado pelo guard).
+
 ### Checklist pra qualquer tela nova que decide "logado ou não" pra UI
 
 - [ ] Nunca chamar `supabase.auth.getSession()` direto pra gate de UI — usar `getEffectiveSession()` de `utils/authSession.js`.
 - [ ] No `useEffect` de auth, assinar `subscribeAuthUiChange()` além de `onAuthStateChange` (e limpar os dois no cleanup).
 - [ ] **No callback do `onAuthStateChange`, nunca usar o `session` recebido pra setar o usuário/UI diretamente** — ele só deve disparar a função que rechama `getEffectiveSession()`. Setar direto do `session` do callback reaplica a sessão real por cima do soft-logout assim que o token se renova sozinho em background.
+- [ ] **Em `initAuthStateListener()`, sempre ignorar o primeiro evento recebido** (`isInitialEvent`) — o Supabase reporta a reidratação da sessão no cold start como `SIGNED_IN`, e sem esse guard o soft-logout é desligado sozinho toda vez que o app abre.
 - [ ] Já aplicado em: `app/_layout.js`, `app/profile.js`, `app/pedidos.js`, `app/addresses.js`, `components/AuthBottomSheet.tsx`, `components/EntrarBanner.tsx`.
 
 ---

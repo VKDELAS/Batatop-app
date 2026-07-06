@@ -429,13 +429,10 @@ export default function Pedidos() {
     return (
       <View style={es.wrap}>
         <Image source={batataDormindo} style={es.image} resizeMode="contain" />
-        <Text style={es.title}>Poxa, você não tem nenhum pedido</Text>
+        <Text style={es.title}>Seus pedidos vão aparecer aqui</Text>
         <Text style={es.sub}>
-          Seus pedidos vão aparecer aqui quando você fizer. Que tal aproveitar as ofertas pra pedir agora?
+          Aqui você pode consultar pedidos em andamento, seu histórico e adicionar um pedido antigo à sacola
         </Text>
-        <Pressable onPress={() => router.push('/')} hitSlop={8}>
-          <Text style={es.ctaText}>Fazer pedido</Text>
-        </Pressable>
       </View>
     );
   }
@@ -445,10 +442,13 @@ export default function Pedidos() {
     return (
       <View style={es.wrap}>
         <Image source={batataDormindo} style={es.image} resizeMode="contain" />
-        <Text style={es.title}>Seus pedidos vão aparecer aqui</Text>
+        <Text style={es.title}>Poxa, você não tem nenhum pedido</Text>
         <Text style={es.sub}>
-          Aqui você pode consultar pedidos em andamento, seu histórico e adicionar um pedido antigo à sacola
+          Seus pedidos vão aparecer aqui quando você fizer. Que tal aproveitar as ofertas pra pedir agora?
         </Text>
+        <Pressable onPress={() => router.push('/')} hitSlop={8}>
+          <Text style={es.ctaText}>Fazer pedido</Text>
+        </Pressable>
       </View>
     );
   }

@@ -19,6 +19,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { useProdutos } from './hooks/useProdutos';
+import BannerCarousel from '../components/BannerCarousel';
 import {
   useScrollHandler,
   useHeaderHeight,
@@ -408,6 +409,11 @@ export default function Home() {
               </Pressable>
             ))}
           </View>
+        </View>
+
+        {/* ══════════════════ BANNERS (carrossel) ══════════════════ */}
+        <View style={s.section}>
+          <BannerCarousel />
         </View>
 
         {/* ══════════════════ DESTAQUES (scroll horizontal) ══════════════════ */}

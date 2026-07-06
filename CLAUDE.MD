@@ -24,7 +24,7 @@ O backend compartilhado (pagamentos + push de pedidos) está no site **Next.js**
 - **Endereços (`app/addresses.js`)**: Gestão de endereços com integração ViaCEP e validação geográfica (somente Iacanga-SP).
 - **Admin (`app/admin/`)**: Painel administrativo com dashboard, gestão de pedidos, produtos, cupons, promoções, caixa, feedbacks e imagens.
 - **Push de novo pedido (admin)**: Notificação **real do sistema** (Expo Push) — funciona com app fechado. Mostra cliente, itens e adicionais; toque abre `/admin/pedidos`.
-- **Autenticação (`app/auth/`)**: Telas de login (`login.js`) e cadastro (`register.js`) via Supabase Auth.
+- **Autenticação (`app/auth/`)**: Telas de login (`login.js`), cadastro (`register.js`), autenticação via telefone (`telefone.js`) e código (`codigo.js`) via Supabase Auth.
 
 ---
 
@@ -43,10 +43,10 @@ batata-top/                          # App mobile (este repositório)
 │   ├── profile.js
 │   ├── profile-data.js
 │   ├── profile-security.js
-│   ├── auth/                        # login.js, register.js
+│   ├── auth/                        # login.js, register.js, codigo.js, telefone.js
 │   ├── produto/[id].js
 │   ├── pedidos/[id].js
-│   ├── hooks/                       # useProdutos.js, usePedidos.js
+│   ├── hooks/                       # useProdutos.js, useProductRanking.js, usePedidos.js, useGeolocationWithMaps.js, usePlacesAutocomplete.js
 │   └── admin/
 │       ├── _layout.js
 │       ├── index.js                 # Re-registra push token ao abrir painel
@@ -55,17 +55,29 @@ batata-top/                          # App mobile (este repositório)
 │       ├── caixa.js                 # Polling 30s
 │       ├── feedbacks.js, imagens.js
 ├── components/
-│   ├── AdminPushRegistration.js   # Registro Expo Push + deep link ao tocar
-│   └── PaymentMethodModal.js
+│   ├── AddressCard.js
+│   ├── AddressModal.js
+│   ├── AdminPushRegistration.js     # Registro Expo Push + deep link ao tocar
+│   ├── AnimatedSplash.js
+│   ├── AuthBottomSheet.tsx
+│   ├── BannerCarousel.js
+│   ├── EntrarBanner.tsx
+│   ├── HelpModal.js
+│   ├── LogoutRememberModal.js
+│   ├── MapSelector.tsx
+│   ├── PaymentMethodModal.js
+│   └── ThemedAlert.js
 ├── constants/theme.js
 ├── data/produtos.js                 # LEGADO — mock; produção usa Supabase
 ├── utils/
+│   ├── addressHelpers.js
 │   ├── cartStore.js
 │   ├── authSession.js               # Soft-logout: ver seção 11
 │   ├── mercadoPago.js
 │   ├── usePaymentCards.ts
 │   ├── paymentPrefs.js
-│   ├── notificationSound.js       # Som new-order.mp3 (foreground)
+│   ├── pendingAddress.js
+│   ├── notificationSound.js         # Som new_order.mp3 (foreground)
 │   ├── pushNotifications.js         # Permissões, canal Android, token, listeners
 │   ├── notifyNewOrder.js            # Chama Edge Function ou Vercel API
 │   ├── orderNotificationContent.js  # Formato título/corpo da push
@@ -80,7 +92,7 @@ batata-top/                          # App mobile (este repositório)
 │   └── notify-new-order.js          # Cópia legada CommonJS (referência)
 ├── assets/
 │   ├── banner.png
-│   └── sounds/new-order.mp3
+│   └── sounds/new_order.mp3
 ├── supabaseConfig.js
 ├── app.json                         # Plugin expo-notifications configurado
 ├── .env
@@ -161,7 +173,7 @@ const headerHeight = useHeaderHeight();
 
 **Carrinho (`utils/cartStore.js`):** Observer pattern + hook `useCart()`. `cartItemId` = `${product.id}-${adIds}-${observacoes}`.
 
-**Backend:** Hooks em `app/hooks/` (`useProdutos.js`, `usePedidos.js`).
+**Backend:** Hooks em `app/hooks/` (`useProdutos.js`, `useProductRanking.js`, `usePedidos.js`, `useGeolocationWithMaps.js`, `usePlacesAutocomplete.js`).
 
 **Cartões (`utils/usePaymentCards.ts`):** Tokenização client-side + tabela `payment_cards`.
 
@@ -258,7 +270,7 @@ Notificação **real do sistema operacional** (como WhatsApp) — funciona com a
 3. notifyAdminNewOrder(orderId) é chamado
 4. POST https://batatatop.vercel.app/api/notify-new-order
 5. Vercel monta mensagem e envia via Expo Push API
-6. Admin recebe notificação na barra do celular + som new-order.mp3
+6. Admin recebe notificação na barra do celular + som new_order.mp3
 7. Toque na notificação → app abre /admin/pedidos
 ```
 
@@ -281,7 +293,7 @@ Notificação **real do sistema operacional** (como WhatsApp) — funciona com a
 | `utils/isAdmin.js` | Quem recebe/registra push |
 | `app/admin/index.js` | Re-sincroniza token ao abrir painel |
 | `app/checkout.tsx` | `notifyAdminNewOrder(created.id)` após insert |
-| `assets/sounds/new-order.mp3` | Som customizado da push |
+| `assets/sounds/new_order.mp3` | Som customizado da push |
 | `app.json` | Plugin `expo-notifications` + permissão `POST_NOTIFICATIONS` (Android) |
 
 ### Conteúdo da notificação
@@ -295,16 +307,15 @@ Corpo:   Maria Silva
          1x Refrigerante
          ────────────────
          Toque para gerenciar o pedido
-Som:     new-order.mp3 (canal Android prioridade MAX)
+Som:     new_order.mp3 (canal Android prioridade MAX)
 Toque:   /admin/pedidos
 ```
 
 ### Registro do token (admin)
 
-`isAdminUser(user)` em `utils/isAdmin.js`:
-- E-mail `enzzobaraldo2008@gmail.com`
-- E-mail contendo `admin`
-- `user_metadata.role === 'admin'`
+A validação de administrador é feita em duas etapas em `utils/isAdmin.js` (através de `isAdminUser(user)` e `checkIsAdmin(userId)`):
+- **Validação instantânea (client-side)**: E-mail exato (`enzzobaraldo2008@gmail.com`), e-mail contendo a palavra `admin` ou role nos metadados (`user.user_metadata.role === 'admin'`).
+- **Validação no banco de dados (async)**: Consulta a coluna `role` na tabela `profiles` do Supabase para verificar se o privilégio está ativo (`role === 'admin'`).
 
 Token upsert em `admin_push_tokens` via Supabase (RLS: admin gerencia só o próprio token).
 
@@ -533,16 +544,12 @@ export function initAuthStateListener() {
 }
 ```
 
-Comportamento esperado depois do fix:
-- **Saiu do app logado (sem soft-logout ativo):** abre logado de novo — `getEffectiveSession()` não depende desse listener, só olha a flag + sessão real.
-- **Saiu do app com soft-logout ativo ("Sim, lembrar"):** abre deslogado — só volta a logar quando a pessoa toca em "Continuar como [nome]" de propósito, ou faz um login de verdade digitando credencial (esse sim chega **depois** do evento inicial, não é bloqueado pelo guard).
-
 ### Checklist pra qualquer tela nova que decide "logado ou não" pra UI
 
 - [ ] Nunca chamar `supabase.auth.getSession()` direto pra gate de UI — usar `getEffectiveSession()` de `utils/authSession.js`.
 - [ ] No `useEffect` de auth, assinar `subscribeAuthUiChange()` além de `onAuthStateChange` (e limpar os dois no cleanup).
-- [ ] **No callback do `onAuthStateChange`, nunca usar o `session` recebido pra setar o usuário/UI diretamente** — ele só deve disparar a função que rechama `getEffectiveSession()`. Setar direto do `session` do callback reaplica a sessão real por cima do soft-logout assim que o token se renova sozinho em background.
-- [ ] **Em `initAuthStateListener()`, sempre ignorar o primeiro evento recebido** (`isInitialEvent`) — o Supabase reporta a reidratação da sessão no cold start como `SIGNED_IN`, e sem esse guard o soft-logout é desligado sozinho toda vez que o app abre.
+- [ ] **No callback do `onAuthStateChange`, nunca usar o `session` recebido pra setar o usuário/UI diretamente** — ele só deve disparar a função que reaplica a sessão real por cima do soft-logout assim que o token se renova sozinho em background.
+- [x] **Em `initAuthStateListener()`, sempre ignorar o primeiro evento recebido** (`isInitialEvent`) — o Supabase reporta a reidratação da sessão no cold start como `SIGNED_IN`, e sem esse guard o soft-logout é desligado sozinho toda vez que o app abre.
 - [ ] Já aplicado em: `app/_layout.js`, `app/profile.js`, `app/pedidos.js`, `app/addresses.js`, `components/AuthBottomSheet.tsx`, `components/EntrarBanner.tsx`.
 
 ---
@@ -562,6 +569,16 @@ import { ThemedAlertHost, showThemedAlert } from '../components/ThemedAlert';
 
 ---
 
+## 12.1. Card de Destaques (`DestaqueMiniCard`, `app/index.js`) — Imagem sem corte
+
+**Card:** `miniCard` não tem mais borda amarela de destaque (`borderColor: COLORS.primary`) — ficou com borda neutra padrão (`COLORS.border`, 1px), igual ao resto dos cards do app.
+
+**Imagem (`miniImg`):** trocado de `resizeMode="cover"` (padrão implícito) para `resizeMode="contain"`, dentro de um wrapper (`miniImgWrapper`) com `backgroundColor: COLORS.backgroundElevated` e altura fixa (130). Isso garante que a foto do produto sempre apareça **inteira**, sem cortar bordas e sem dar zoom — independente da proporção original da imagem. Se a foto não preencher 100% da largura/altura do wrapper, sobra um respiro com a cor de fundo elevada (não fica branco/preto feio).
+
+- Esse padrão (wrapper com bg + `Image` em `contain`) é o preferido pra qualquer card novo onde a imagem do produto precisa aparecer completa. Pra cards tipo `ProdutoCard` (Mais Pedidos) que usam `cover` de propósito (overlay + rank badge por cima), manter `cover` — a decisão é caso a caso, não uma regra global.
+
+---
+
 ## 13. Informações para Manutenção
 
 - **Design System:** `constants/theme.js` — nunca hardcodar cores/espaçamentos.
@@ -575,7 +592,7 @@ import { ThemedAlertHost, showThemedAlert } from '../components/ThemedAlert';
 
 # CLAUDE.md
 
-Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
+Behavior guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 

@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 import { isRunningInExpoGo } from 'expo';
 
 import { supabase } from '../supabaseConfig';
-import { isAdminUser } from './isAdmin';
+import { isAdminUser, checkIsAdmin } from './isAdmin';
 import { playNewOrderSound } from './notificationSound';
 
 export const ADMIN_ORDERS_CHANNEL_ID = 'new-orders';
@@ -136,7 +136,13 @@ export async function unregisterAdminPushToken(userId, expoPushToken) {
 }
 
 export async function syncAdminPushRegistration(user) {
-  if (!isAdminUser(user)) return null;
+  if (!user) return null;
+  const isInstant = isAdminUser(user);
+  let isDb = false;
+  if (!isInstant) {
+    isDb = await checkIsAdmin(user.id);
+  }
+  if (!isInstant && !isDb) return null;
   return registerForAdminPushNotifications(user.id);
 }
 

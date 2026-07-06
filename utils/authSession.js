@@ -49,7 +49,16 @@ export function initAuthStateListener() {
   if (listenerInitialized) return;
   listenerInitialized = true;
 
+  // O primeiro evento após assinar é sempre a reidratação da sessão do
+  // AsyncStorage no cold start, não um login real — precisa ser ignorado.
+  let isInitialEvent = true;
+
   supabase.auth.onAuthStateChange(async (event, session) => {
+    if (isInitialEvent) {
+      isInitialEvent = false;
+      return;
+    }
+
     if (event === 'SIGNED_IN' && session) {
       const soft = await AsyncStorage.getItem(SOFT_LOGOUT_KEY);
       if (soft === 'true') {

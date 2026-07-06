@@ -17,8 +17,9 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme';
-import { useProdutos } from './hooks/useProdutos';
+import { useProductRanking } from './hooks/useProductRanking';
 import BannerCarousel from '../components/BannerCarousel';
 import {
   useScrollHandler,
@@ -33,7 +34,7 @@ import {
 function PressableScale({ children, onPress, style }) {
   const scale = useRef(new Animated.Value(1)).current;
   const handlePressIn = () =>
-    Animated.timing(scale, { toValue: 0.96, duration: 100, useNativeDriver: true }).start();
+    Animated.timing(scale, { toValue: 0.97, duration: 100, useNativeDriver: true }).start();
   const handlePressOut = () =>
     Animated.timing(scale, { toValue: 1, duration: 180, useNativeDriver: true }).start();
 
@@ -44,10 +45,11 @@ function PressableScale({ children, onPress, style }) {
   );
 }
 
-// ─── Cupom Card (estilo iFood) ────────────────────────────────────────────────
-function CupomCard({ codigo, desconto, descricao, tipo = 'percent' }) {
+// ─── Cupom Card (card branco, borda amarela, botão fica verde ao copiar) ──────
+function CupomCard({ codigo, desconto, descricao, validade }) {
   const [copiado, setCopiado] = useState(false);
   const scaleAnim = useRef(new Animated.Value(1)).current;
+  const corAnim = useRef(new Animated.Value(0)).current; // 0 = amarelo, 1 = verde
 
   const copiarCodigo = () => {
     if (Clipboard && Clipboard.setString) {
@@ -59,63 +61,69 @@ function CupomCard({ codigo, desconto, descricao, tipo = 'percent' }) {
       } catch (_) {}
     }
     Animated.sequence([
-      Animated.timing(scaleAnim, { toValue: 0.93, duration: 80, useNativeDriver: true }),
+      Animated.timing(scaleAnim, { toValue: 0.9, duration: 80, useNativeDriver: true }),
       Animated.spring(scaleAnim, { toValue: 1, friction: 4, useNativeDriver: true }),
     ]).start();
+    Animated.timing(corAnim, { toValue: 1, duration: 200, useNativeDriver: false }).start();
     setCopiado(true);
     if (Platform.OS === 'android') ToastAndroid.show('Cupom copiado!', ToastAndroid.SHORT);
-    setTimeout(() => setCopiado(false), 2500);
+    setTimeout(() => {
+      Animated.timing(corAnim, { toValue: 0, duration: 250, useNativeDriver: false }).start();
+      setCopiado(false);
+    }, 2000);
   };
 
-  // Tema: Amarelo (#FFB800) e Vermelho (#E61E2A)
-  const bgLeft  = tipo === 'frete' ? '#E61E2A' : '#FFB800';
-  const bgRight = tipo === 'frete' ? '#FFF5F6' : '#FFFDF0';
-
-  const isYellow = bgLeft === '#FFB800';
-  const textColorLeft = isYellow ? '#5C3E00' : '#FFFFFF';
-  const badgeBgColor = isYellow ? 'rgba(0,0,0,0.06)' : 'rgba(0,0,0,0.22)';
-  const badgeTextColor = isYellow ? '#5C3E00' : '#FFFFFF';
-  const descTextColor = isYellow ? 'rgba(92,62,0,0.85)' : 'rgba(255,255,255,0.85)';
-
-  const codeLabelColor = isYellow ? '#B8860B' : '#E61E2A';
-  const codeColor = isYellow ? '#5C3E00' : '#E61E2A';
-  const buttonBgColor = isYellow ? 'rgba(255,184,0,0.18)' : 'rgba(230,30,42,0.1)';
-  const buttonTextColor = isYellow ? '#5C3E00' : '#E61E2A';
+  const botaoBg = corAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['#FFFFFF', '#22C55E'],
+  });
+  const botaoBorda = corAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [COLORS.primary, '#22C55E'],
+  });
+  const botaoTexto = corAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [COLORS.primary, '#FFFFFF'],
+  });
+  const botaoIcone = copiado ? '#FFFFFF' : COLORS.primary;
 
   return (
-    <Animated.View style={[s.cupomCard, { transform: [{ scale: scaleAnim }] }]}>
-      <Pressable onPress={copiarCodigo} style={s.cupomInner}>
-        {/* Lado esquerdo */}
-        <View style={[s.cupomLeft, { backgroundColor: bgLeft }]}>
-          <View style={[s.cupomBadge, { backgroundColor: badgeBgColor }]}>
-            <Ionicons name="pricetag" size={10} color={badgeTextColor} />
-            <Text style={[s.cupomBadgeText, { color: badgeTextColor }]}>CUPOM</Text>
-          </View>
-          <Text style={[s.cupomDesconto, { color: textColorLeft }]}>{desconto}</Text>
-          <Text style={[s.cupomDesc, { color: descTextColor }]}>{descricao}</Text>
+    <View style={s.cupomCardShadow}>
+      <View style={s.cupomCard}>
+        <LinearGradient
+          colors={['transparent', COLORS.primary, COLORS.primary, 'transparent']}
+          locations={[0, 0.15, 0.85, 1]}
+          style={s.cupomAccent}
+        />
+
+        <View style={s.cupomTopRow}>
+          <Text style={s.cupomCodigo} numberOfLines={1}>{codigo}</Text>
+          <Pressable onPress={copiarCodigo} hitSlop={8}>
+            {/* Animated.View de fora só cuida do scale (native driver).
+                A de dentro só cuida das cores (JS driver). Cada uma no seu
+                node — é isso que evita o erro de misturar driver native/JS
+                no mesmo Animated.View. */}
+            <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+              <Animated.View
+                style={[s.cupomBotao, { backgroundColor: botaoBg, borderColor: botaoBorda }]}
+              >
+                <Ionicons name={copiado ? 'checkmark' : 'copy-outline'} size={12} color={botaoIcone} />
+                <Animated.Text style={[s.cupomBotaoText, { color: botaoTexto }]}>
+                  {copiado ? 'Copiado!' : 'Copiar'}
+                </Animated.Text>
+              </Animated.View>
+            </Animated.View>
+          </Pressable>
         </View>
 
-        {/* Divisor */}
-        <View style={[s.cupomDivider, { backgroundColor: bgLeft }]}>
-          <View style={[s.cupomCircle, s.cupomCircleTop,    { backgroundColor: COLORS.background }]} />
-          <View style={[s.cupomCircle, s.cupomCircleBottom, { backgroundColor: COLORS.background }]} />
-        </View>
+        <Text style={s.cupomDesconto}>
+          <Text style={s.cupomDescontoValor}>{desconto} </Text>
+          {descricao}
+        </Text>
 
-        {/* Lado direito */}
-        <View style={[s.cupomRight, { backgroundColor: bgRight }]}>
-          <Text style={[s.cupomCodigoLabel, { color: codeLabelColor }]}>CÓDIGO</Text>
-          <Text style={[s.cupomCodigo, { color: codeColor }, copiado && s.cupomCopiado]}>
-            {copiado ? 'OK!' : codigo}
-          </Text>
-          <View style={[s.cupomBotao, { backgroundColor: copiado ? 'rgba(0,0,0,0.25)' : buttonBgColor }]}>
-            <Ionicons name={copiado ? 'checkmark' : 'copy-outline'} size={11} color={copiado ? '#fff' : buttonTextColor} />
-            <Text style={[s.cupomBotaoText, { color: copiado ? '#fff' : buttonTextColor }]}>
-              {copiado ? 'Copiado!' : 'Copiar'}
-            </Text>
-          </View>
-        </View>
-      </Pressable>
-    </Animated.View>
+        <Text style={s.cupomValidade}>{validade}</Text>
+      </View>
+    </View>
   );
 }
 
@@ -196,27 +204,37 @@ function DestaqueMiniCard({ produto }) {
     : { uri: produto.imagem };
 
   return (
-    <PressableScale onPress={() => router.push(`/produto/${produto.id}`)} style={s.miniCard}>
-      <Image
-        source={imageSource}
-        style={s.miniImg}
-        onError={() => setUseFallback(true)}
-      />
-      <View style={s.miniBody}>
-        <Text style={s.miniNome} numberOfLines={1}>{produto.nome}</Text>
+    <PressableScale onPress={() => router.push(`/produto/${produto.id}`)}>
+      <View style={s.miniCard}>
+        <View style={s.miniImgWrapper}>
+          <Image
+            source={imageSource}
+            style={s.miniImg}
+            resizeMode="cover"
+            onError={() => setUseFallback(true)}
+          />
+        </View>
+        <View style={s.miniBody}>
+          <Text style={s.miniNome} numberOfLines={2}>{produto.nome}</Text>
 
-        <View style={s.miniTags}>
-          <View style={s.miniTag}>
-            <Ionicons name="star" size={9} color={COLORS.primary} />
-            <Text style={s.miniTagText}>{produto.avaliacoes || '4.5'}</Text>
+          <View style={s.miniTags}>
+            <View style={s.miniTag}>
+              <Ionicons name="star" size={9} color={COLORS.primary} />
+              <Text style={s.miniTagText}>{produto.avaliacoes || '4.5'}</Text>
+            </View>
+            <View style={s.miniTag}>
+              <Ionicons name="time-outline" size={9} color={COLORS.textMuted} />
+              <Text style={s.miniTagText}>{produto.tempo} min</Text>
+            </View>
           </View>
-          <View style={s.miniTag}>
-            <Ionicons name="time-outline" size={9} color={COLORS.textMuted} />
-            <Text style={s.miniTagText}>{produto.tempo} min</Text>
+
+          <View style={s.miniFooter}>
+            <Text style={s.miniPreco}>{produto.precoFormatado}</Text>
+            <Pressable style={s.miniBtnAdd} onPress={() => router.push(`/produto/${produto.id}`)}>
+              <Ionicons name="add" size={20} color={COLORS.background} />
+            </Pressable>
           </View>
         </View>
-
-        <Text style={s.miniPreco}>{produto.precoFormatado}</Text>
       </View>
     </PressableScale>
   );
@@ -343,7 +361,7 @@ function CategoriasFlutuantes({ scrollY, categoriasBottomY, headerHidden, router
 // ─── Tela Principal ────────────────────────────────────────────────────────────
 export default function Home() {
   const router = useRouter();
-  const { produtos, loading } = useProdutos();
+  const { produtos, loading } = useProductRanking();
   const { onScroll, resetHeader, scrollY } = useScrollHandler();
   const headerHeight = useHeaderHeight();
   const headerHidden = useHeaderHidden();
@@ -365,12 +383,13 @@ export default function Home() {
     }, [resetHeader])
   );
 
-  const maisPedidos = produtos.slice(0, 4);
-  const destaques = produtos.slice(0, 6);
+  const disponiveis = produtos.filter(p => p.disponivel);
+  const maisPedidos = disponiveis.slice(0, 4);
+  const destaques = disponiveis.slice(0, 6);
 
   const CUPONS = [
-    { codigo: 'BATATOP15', desconto: '15% OFF', descricao: 'na primeira compra', tipo: 'percent' },
-    { codigo: 'FRETE0', desconto: 'FRETE', descricao: 'grátis em qualquer pedido', tipo: 'frete' },
+    { codigo: 'BATATA5', desconto: 'R$5 OFF', descricao: 'em qualquer batata', validade: 'Válido até 31/07' },
+    { codigo: 'PRIMEIRA20', desconto: '20% OFF', descricao: 'na primeira compra', validade: 'Válido até 31/07' },
   ];
 
   return (
@@ -446,7 +465,7 @@ export default function Home() {
           <View style={s.sectionRow}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <View style={s.cupomSectionIcon}>
-                <Ionicons name="pricetag" size={13} color={COLORS.secondary} />
+                <Ionicons name="pricetag" size={13} color="#FFD54F" />
               </View>
               <Text style={s.sectionTitle}>Cupons disponíveis</Text>
             </View>
@@ -459,7 +478,7 @@ export default function Home() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={s.cupomRow}
             decelerationRate="fast"
-            snapToInterval={272}
+            snapToInterval={212}
             snapToAlignment="start"
           >
             {CUPONS.map((c) => (
@@ -468,28 +487,6 @@ export default function Home() {
           </ScrollView>
         </View>
 
-        {/* ══════════════════ COMO FUNCIONA ══════════════════ */}
-        <View style={s.section}>
-          <View style={s.sectionRow}>
-            <Text style={s.sectionTitle}>Como funciona</Text>
-          </View>
-          <View style={s.howRow}>
-            {[
-              { icon: 'search-outline',      titulo: 'Escolha',  sub: 'Navegue pelo cardápio'  },
-              { icon: 'card-outline',         titulo: 'Pague',    sub: 'Rápido e seguro'        },
-              { icon: 'bicycle-outline',      titulo: 'Receba',   sub: 'Em até 22 minutos'      },
-            ].map((step, i) => (
-              <View key={step.titulo} style={s.howStep}>
-                <View style={s.howIconWrap}>
-                  <Ionicons name={step.icon} size={22} color={COLORS.primary} />
-                  {i < 2 && <View style={s.howLine} />}
-                </View>
-                <Text style={s.howTitulo}>{step.titulo}</Text>
-                <Text style={s.howSub}>{step.sub}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
         <View style={s.section}>
           <View style={s.sectionRow}>
             <Text style={s.sectionTitle}>Mais pedidos</Text>
@@ -658,7 +655,7 @@ const s = StyleSheet.create({
     gap: SPACING[3],
   },
   miniCard: {
-    width: 130,
+    width: 170,
     backgroundColor: COLORS.backgroundCard,
     borderRadius: RADIUS.xl,
     borderWidth: 1,
@@ -666,32 +663,51 @@ const s = StyleSheet.create({
     overflow: 'hidden',
     ...SHADOWS.sm,
   },
+  miniImgWrapper: {
+    width: '100%',
+    height: 130,
+    backgroundColor: COLORS.backgroundElevated,
+  },
   miniImg: {
     width: '100%',
-    height: 90,
-    backgroundColor: COLORS.backgroundElevated,
+    height: '100%',
   },
   miniBody: {
     padding: SPACING[3],
-    gap: SPACING[1],
+    gap: SPACING[2],
+    flex: 1,
+    justifyContent: 'space-between',
   },
   miniNome: {
     color: COLORS.text,
     fontWeight: '700',
-    fontSize: 11,
-    lineHeight: 15,
+    fontSize: 13,
+    lineHeight: 16,
   },
   miniPreco: {
-    color: COLORS.primary,
+    color: '#000000',
     fontWeight: '800',
-    fontSize: 13,
-    marginTop: 2,
+    fontSize: 16,
+  },
+  miniFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: SPACING[2],
+  },
+  miniBtnAdd: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   miniTags: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    marginVertical: 3,
+    marginVertical: 2,
   },
   miniTag: {
     flexDirection: 'row',
@@ -714,11 +730,11 @@ const s = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 7,
-    backgroundColor: '#E61E2A10',
+    backgroundColor: '#FFD54F1A',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#E61E2A20',
+    borderColor: '#FFD54F33',
   },
   cupomRow: {
     paddingHorizontal: SPACING[6],
@@ -738,124 +754,76 @@ const s = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
   },
-  cupomCard: {
-    width: 260,
+  cupomCardShadow: {
     borderRadius: 16,
-    overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 5,
+    elevation: 2,
   },
-  cupomInner: {
-    flexDirection: 'row',
-    height: 114,
-  },
-  cupomLeft: {
-    flex: 1,
+  cupomCard: {
+    width: 172,
+    height: 130,
+    borderRadius: 16,
+    backgroundColor: COLORS.backgroundCard,
     padding: 14,
-    gap: 2,
-    justifyContent: 'center',
-    overflow: 'visible',
+    paddingLeft: 20,
     position: 'relative',
+    overflow: 'hidden',
+    justifyContent: 'space-between',
   },
-  cupomNotch: {
+  // barra de acento à esquerda: em vez de ir de ponta a ponta (top:0/bottom:0)
+  // e deixar o overflow:hidden + borderRadius:16 do card cortar ela lá no
+  // fundo da curva, a barra agora já nasce e morre no MEIO da curva (inset
+  // de 8 = metade do borderRadius de 16). O fade do gradiente cuida só da
+  // pontinha final, bem curto, pra suavizar — quem define "onde sai" agora
+  // é o tamanho/posição da barra, não o gradiente.
+  cupomAccent: {
     position: 'absolute',
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#F5F5F5',
-    right: -10,
-    zIndex: 5,
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
+    borderRadius: 1.5,
   },
-  cupomNotchTop:    { top: -10 },
-  cupomNotchBottom: { bottom: -10 },
-  cupomBadge: {
+  cupomTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(0,0,0,0.22)',
-    borderRadius: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    alignSelf: 'flex-start',
-    marginBottom: 4,
-  },
-  cupomBadgeText: {
-    color: '#fff',
-    fontSize: 9,
-    fontWeight: '900',
-    letterSpacing: 1.4,
-  },
-  cupomDesconto: {
-    color: '#fff',
-    fontWeight: '900',
-    fontSize: 24,
-    lineHeight: 28,
-    letterSpacing: -0.5,
-  },
-  cupomDesc: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: 11,
-    lineHeight: 14,
-    fontWeight: '500',
-  },
-  cupomDivider: {
-    width: 10,
-    borderRightWidth: 1.5,
-    borderRightColor: 'rgba(255,255,255,0.35)',
-    borderStyle: 'dashed',
-    position: 'relative',
-    zIndex: 2,
-  },
-  cupomCircle: {
-    position: 'absolute',
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    right: -9,
-    zIndex: 6,
-  },
-  cupomCircleTop:    { top: -9 },
-  cupomCircleBottom: { bottom: -9 },
-  cupomRight: {
-    width: 90,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    paddingHorizontal: 10,
-  },
-  cupomCodigoLabel: {
-    color: 'rgba(0,0,0,0.45)',
-    fontSize: 8,
-    fontWeight: '800',
-    letterSpacing: 1,
+    justifyContent: 'space-between',
+    gap: 8,
   },
   cupomCodigo: {
-    color: '#1A1A1A',
+    flexShrink: 1,
+    color: COLORS.primary,
     fontWeight: '900',
-    fontSize: 12,
-    letterSpacing: 1.5,
-    textAlign: 'center',
-  },
-  cupomCopiado: {
-    color: '#fff',
-    fontSize: 13,
+    fontSize: 16,
+    letterSpacing: 0.3,
   },
   cupomBotao: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    backgroundColor: 'rgba(0,0,0,0.15)',
-    borderRadius: 8,
-    paddingHorizontal: 7,
+    gap: 4,
+    borderWidth: 1.3,
+    borderRadius: 999,
+    paddingHorizontal: 10,
     paddingVertical: 5,
   },
   cupomBotaoText: {
-    color: '#1A1A1A',
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: '700',
+  },
+  cupomDesconto: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: COLORS.text,
+  },
+  cupomDescontoValor: {
+    fontWeight: '800',
+  },
+  cupomValidade: {
+    fontSize: 11,
+    color: COLORS.textMuted,
   },
 
   // ── PRODUTO CARD (Mais Pedidos) ───────────────────────────────────────────
@@ -964,52 +932,4 @@ const s = StyleSheet.create({
     paddingVertical: SPACING[10],
   },
 
-  // ── COMO FUNCIONA ─────────────────────────────────────────────────────────
-  howRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: SPACING[6],
-    backgroundColor: COLORS.backgroundCard,
-    marginHorizontal: SPACING[6],
-    borderRadius: RADIUS.xl,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingVertical: SPACING[5],
-    ...SHADOWS.sm,
-  },
-  howStep: {
-    flex: 1,
-    alignItems: 'center',
-    gap: SPACING[1],
-  },
-  howIconWrap: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: COLORS.primary + '15',
-    borderWidth: 1.5,
-    borderColor: COLORS.primary + '40',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: SPACING[2],
-  },
-  howLine: {
-    position: 'absolute',
-    right: -32,
-    top: '50%',
-    width: 28,
-    height: 1.5,
-    backgroundColor: COLORS.border,
-  },
-  howTitulo: {
-    color: COLORS.text,
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  howSub: {
-    color: COLORS.textMuted,
-    fontSize: 10,
-    textAlign: 'center',
-    lineHeight: 14,
-  },
 });

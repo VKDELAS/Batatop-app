@@ -15,13 +15,14 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../../utils/supabase';
+import { supabase } from '../../supabaseConfig';
 import { useCart } from '../../utils/cartStore';
 import { COLORS, SHADOWS, RADIUS } from '../../constants/theme';
 
 const { width } = Dimensions.get('window');
 
-const SUPABASE_STORAGE = 'https://eucwoxjmjfqylyrqunwk.supabase.co/storage/v1/object/public/Products/';
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://eucwoxjmjfqylyrqunwk.supabase.co';
+const SUPABASE_STORAGE = `${SUPABASE_URL}/storage/v1/object/public/Products/`;
 
 const CATEGORY_FALLBACKS = {
   batatas: 'https://images.unsplash.com/photo-1518013391915-e40643a1bce1?w=800',

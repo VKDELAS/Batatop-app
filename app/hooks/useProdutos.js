@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseConfig';
 
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://eucwoxjmjfqylyrqunwk.supabase.co';
+
 export const useProdutos = () => {
   const [produtos, setProdutos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -29,7 +31,7 @@ export const useProdutos = () => {
         preco: produto.price,
         precoFormatado: `R$ ${produto.price.toFixed(2).replace('.', ',')}`,
         categoria: produto.category ? produto.category.charAt(0).toUpperCase() + produto.category.slice(1) : 'Outros',
-        imagem: produto.image_url ? (produto.image_url.startsWith('http') ? produto.image_url : `https://eucwoxjmjfqylyrqunwk.supabase.co/storage/v1/object/public/Products/${produto.image_url.replace(/^\/products\//, '')}`) : null, // Fallback para URL vazia
+        imagem: produto.image_url ? (produto.image_url.startsWith('http') ? produto.image_url : `${SUPABASE_URL}/storage/v1/object/public/Products/${produto.image_url.replace(/^\/products\//, '')}`) : null, // Fallback para URL vazia
         ranking: 0,
         avaliacoes: 4.5,
         avaliacoesCount: 0,
@@ -89,7 +91,7 @@ export const useProdutoById = (id) => {
         precoFormatado: `R$ ${data.price.toFixed(2).replace('.', ',')}`,
         categoria: data.category ? data.category.charAt(0).toUpperCase() + data.category.slice(1) : 'Outros',
         // Priorizar imagens locais da pasta public/products
-        imagem: data.image_url ? (data.image_url.startsWith('http') ? data.image_url : `https://eucwoxjmjfqylyrqunwk.supabase.co/storage/v1/object/public/Products/${data.image_url.replace(/^\/products\//, '')}`) : null,
+        imagem: data.image_url ? (data.image_url.startsWith('http') ? data.image_url : `${SUPABASE_URL}/storage/v1/object/public/Products/${data.image_url.replace(/^\/products\//, '')}`) : null,
         ranking: 0,
         avaliacoes: 4.5,
         avaliacoesCount: 0,
@@ -142,7 +144,7 @@ export const useProdutosPorCategoria = (categoria) => {
         preco: produto.price,
         precoFormatado: `R$ ${produto.price.toFixed(2).replace('.', ',')}`,
         categoria: produto.category ? produto.category.charAt(0).toUpperCase() + produto.category.slice(1) : 'Outros',
-        imagem: produto.image_url ? (produto.image_url.startsWith('http') ? produto.image_url : `https://eucwoxjmjfqylyrqunwk.supabase.co/storage/v1/object/public/Products/${produto.image_url.replace(/^\/products\//, '')}`) : null,
+        imagem: produto.image_url ? (produto.image_url.startsWith('http') ? produto.image_url : `${SUPABASE_URL}/storage/v1/object/public/Products/${produto.image_url.replace(/^\/products\//, '')}`) : null,
         ranking: 0,
         avaliacoes: 4.5,
         avaliacoesCount: 0,
@@ -196,7 +198,7 @@ export const useBuscarProdutos = (termo) => {
         preco: produto.price,
         precoFormatado: `R$ ${produto.price.toFixed(2).replace('.', ',')}`,
         categoria: produto.category ? produto.category.charAt(0).toUpperCase() + produto.category.slice(1) : 'Outros',
-        imagem: produto.image_url ? (produto.image_url.startsWith('http') ? produto.image_url : `https://eucwoxjmjfqylyrqunwk.supabase.co/storage/v1/object/public/Products/${produto.image_url.replace(/^\/products\//, '')}`) : null,
+        imagem: produto.image_url ? (produto.image_url.startsWith('http') ? produto.image_url : `${SUPABASE_URL}/storage/v1/object/public/Products/${produto.image_url.replace(/^\/products\//, '')}`) : null,
         ranking: 0,
         avaliacoes: 4.5,
         avaliacoesCount: 0,

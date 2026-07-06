@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../supabaseConfig';
-import { isAdminUser } from '../../utils/isAdmin';
+import { isAdminUser, checkIsAdmin } from '../../utils/isAdmin';
 import { syncAdminPushRegistration } from '../../utils/pushNotifications';
 
 export default function AdminDashboard() {
@@ -21,12 +21,37 @@ export default function AdminDashboard() {
   });
 
   useEffect(() => {
-    loadDashboard();
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (isAdminUser(session?.user)) {
-        syncAdminPushRegistration(session.user);
+    let mounted = true;
+
+    async function verifyAdmin() {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      
+      const isInstant = isAdminUser(user);
+      let isDb = false;
+      if (!isInstant && user) {
+        isDb = await checkIsAdmin(user.id);
       }
-    });
+
+      if (!isInstant && !isDb) {
+        if (mounted) {
+          Alert.alert('Acesso Negado', 'Você não tem permissão para acessar esta área.');
+          router.replace('/');
+        }
+        return;
+      }
+
+      if (mounted) {
+        syncAdminPushRegistration(user);
+        loadDashboard();
+      }
+    }
+
+    verifyAdmin();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   async function loadDashboard() {

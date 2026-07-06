@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useRouter } from 'expo-router';
 
 import { supabase } from '../supabaseConfig';
-import { isAdminUser } from '../utils/isAdmin';
+import { isAdminUser, checkIsAdmin } from '../utils/isAdmin';
 import {
   setupAdminNotificationListeners,
   syncAdminPushRegistration,
@@ -21,16 +21,30 @@ export default function AdminPushRegistration() {
     let mounted = true;
 
     async function init(session) {
-      if (!mounted || !isAdminUser(session?.user)) return;
+      if (!mounted || !session?.user) return;
+      const isInstant = isAdminUser(session.user);
+      let isDb = false;
+      if (!isInstant) {
+        isDb = await checkIsAdmin(session.user.id);
+      }
+      if (!isInstant && !isDb) return;
+
       const token = await syncAdminPushRegistration(session.user);
       if (mounted) pushTokenRef.current = token;
     }
 
     supabase.auth.getSession().then(({ data: { session } }) => init(session));
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (isAdminUser(session?.user)) {
-        init(session);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        const isInstant = isAdminUser(session.user);
+        let isDb = false;
+        if (!isInstant) {
+          isDb = await checkIsAdmin(session.user.id);
+        }
+        if (isInstant || isDb) {
+          init(session);
+        }
       }
     });
 

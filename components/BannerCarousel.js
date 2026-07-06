@@ -118,6 +118,15 @@ export default function BannerCarousel() {
           renderItem={({ item }) => (
             <View style={s.slide}>
               <View style={s.frame}>
+                {/* Fundo: a mesma imagem, borrada e esticada pra preencher
+                    o card inteiro — some com a sobra vertical dos banners
+                    mais baixos (5 e 6) sem esticar/cortar o banner real. */}
+                <Image
+                  source={item.source}
+                  style={StyleSheet.absoluteFillObject}
+                  resizeMode="cover"
+                  blurRadius={25}
+                />
                 <Image
                   source={item.source}
                   style={{ width: INNER_WIDTH, height: item.height, borderRadius: RADIUS.lg }}
@@ -156,6 +165,7 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
+    position: 'relative',
   },
   dotsRow: {
     flexDirection: 'row',

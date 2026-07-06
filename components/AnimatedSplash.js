@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Image, StyleSheet } from 'react-native';
-import { ResizeMode, Video } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
 
 const BRAND_RED = '#FF0000';
 
@@ -21,8 +21,32 @@ const BRAND_RED = '#FF0000';
  * sem isso ele fica por baixo de tudo que é desenhado depois dele.
  */
 export default function AnimatedSplash({ onFinish }) {
-  const videoRef = useRef(null);
   const [videoReady, setVideoReady] = useState(false);
+
+  const player = useVideoPlayer(require('../assets/splash-animation.mp4'), (playerInstance) => {
+    playerInstance.loop = false;
+    playerInstance.play();
+  });
+
+  useEffect(() => {
+    const statusSubscription = player.addListener('statusChange', ({ status, error }) => {
+      if (status === 'readyToPlay') {
+        setVideoReady(true);
+      } else if (status === 'error') {
+        console.warn('Erro ao tocar splash:', error);
+        onFinish?.();
+      }
+    });
+
+    const finishSubscription = player.addListener('playToEnd', () => {
+      onFinish?.();
+    });
+
+    return () => {
+      statusSubscription.remove();
+      finishSubscription.remove();
+    };
+  }, [player, onFinish]);
 
   return (
     <View style={styles.container}>
@@ -36,23 +60,11 @@ export default function AnimatedSplash({ onFinish }) {
         </View>
       )}
 
-      <Video
-        ref={videoRef}
-        source={require('../assets/splash-animation.mp4')}
+      <VideoView
+        player={player}
         style={[StyleSheet.absoluteFillObject, { opacity: videoReady ? 1 : 0 }]}
-        resizeMode={ResizeMode.CONTAIN}
-        shouldPlay
-        isLooping={false}
-        onReadyForDisplay={() => setVideoReady(true)}
-        onPlaybackStatusUpdate={(status) => {
-          if (status.didJustFinish) {
-            onFinish?.();
-          }
-        }}
-        onError={(error) => {
-          console.warn('Erro ao tocar splash:', error);
-          onFinish?.();
-        }}
+        contentFit="contain"
+        nativeControls={false}
       />
 
       {/* Faixas de reforço — cobrem barras + marca d'água */}
@@ -61,6 +73,7 @@ export default function AnimatedSplash({ onFinish }) {
     </View>
   );
 }
+
 
 const styles = StyleSheet.create({
   container: {

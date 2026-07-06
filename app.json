@@ -24,7 +24,9 @@
       },
       "package": "com.batatatop.app",
       "edgeToEdgeEnabled": true,
-      "permissions": ["POST_NOTIFICATIONS"]
+      "permissions": [
+        "POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -40,7 +42,9 @@
         {
           "icon": "./assets/logo.png",
           "color": "#1A1A1A",
-          "sounds": ["./assets/sounds/new_order.mp3"],
+          "sounds": [
+            "./assets/sounds/new_order.mp3"
+          ],
           "defaultChannel": "new-orders"
         }
       ],
@@ -49,7 +53,8 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Allow"
         }
-      ]
+      ],
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": false

@@ -1,32 +1,32 @@
 /**
  * Design System - Batatop App
- * Cores: Amarelo, Vermelho e Branco
+ * Cores: Âmbar dourado, Terracota e Branco quente
  */
 
 export const COLORS = {
   // Cores Primárias - Batatop Colors
-  primary: '#FFB800', // Amarelo Batatop
-  secondary: '#E61E2A', // Vermelho para detalhes
-  accent: '#E6A800', // Amarelo escuro para hover/press
+  primary: '#E3A008', // Âmbar dourado (era amarelo puro #FFB800)
+  secondary: '#C1440E', // Terracota/tijolo (era vermelho puro #E61E2A)
+  accent: '#B5860A', // Dourado escuro para hover/press
   white: '#FFFFFF',
-  
+
   // Backgrounds
   background: '#FFFFFF',
-  backgroundLight: '#FDFDFD',
-  backgroundElevated: '#F8F8F8',
-  backgroundCard: '#FFFFFF',
-  
+  backgroundLight: '#FDFCFA',
+  backgroundElevated: '#F7F4EF',
+  backgroundCard: '#ffffff',
+
   // Texto
-  text: '#1A1A1A',
-  textSecondary: '#666666',
-  textMuted: '#999999',
+  text: '#1F1B16',
+  textSecondary: '#6B6157',
+  textMuted: '#9C9188',
   textInverse: '#FFFFFF',
-  textPrimary: '#FFB800',
+  textPrimary: '#E3A008',
 
   // Borders e Dividers
-  border: '#EEEEEE',
-  borderLight: '#F5F5F5',
-  borderAccent: '#FFB800',
+  border: '#ECE7E0',
+  borderLight: '#F5F2ED',
+  borderAccent: '#E3A008',
 
   // Status Colors
   success: '#27AE60',

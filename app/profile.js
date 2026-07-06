@@ -11,6 +11,7 @@ import { formatCardDisplay } from '../utils/usePaymentCards';
 import { SOFT_LOGOUT_KEY, emitAuthUiChange, getEffectiveSession } from '../utils/authSession';
 import PaymentMethodModal from '../components/PaymentMethodModal';
 import LogoutRememberModal from '../components/LogoutRememberModal';
+import { isAdminUser, checkIsAdmin } from '../utils/isAdmin';
 
 // Precisa ser IGUAL à SAVED_USER_KEY de components/AuthBottomSheet.tsx
 const SAVED_USER_KEY = '@batatatop:savedUser';
@@ -22,6 +23,7 @@ export default function Profile() {
 
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [defaultAddress, setDefaultAddress] = useState(null);
   const [paymentMethod, setPaymentMethod] = useState('pix');
   const [selectedCardId, setSelectedCardId] = useState(null);
@@ -38,6 +40,7 @@ export default function Profile() {
 
   async function checkUser() {
     try {
+      setIsAdmin(false);
       // getEffectiveSession() já cobre a checagem do soft-logout — retorna
       // null se a flag estiver ligada, mesmo com a sessão real ativa.
       const session = await getEffectiveSession();
@@ -45,6 +48,14 @@ export default function Profile() {
       setUser(u);
 
       if (u) {
+        // Checagem de Administrador
+        const instantAdmin = isAdminUser(u);
+        setIsAdmin(instantAdmin);
+        if (!instantAdmin) {
+          checkIsAdmin(u.id).then(res => {
+            setIsAdmin(res);
+          });
+        }
         // Buscar endereço padrão
         const { data: addr } = await supabase
           .from('addresses')
@@ -215,10 +226,6 @@ export default function Profile() {
       </View>
     );
   }
-
-  const isAdmin = user?.email === 'enzzobaraldo2008@gmail.com' ||
-                  user?.email?.includes('admin') ||
-                  user?.user_metadata?.role === 'admin';
 
   if (!user) {
     return (

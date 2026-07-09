@@ -18,6 +18,10 @@ type EntrarBannerProps = {
   appName?: string;
   /** Disparado ao tocar em "Entrar ou cadastrar-se" */
   onPress: () => void;
+  /** Altura real medida da BottomTabBar (vem do _layout.js) — usado pra
+   *  posicionar o banner sempre logo acima dela, sem duplicar cálculo de
+   *  insets aqui dentro. */
+  tabBarHeight: number;
 };
 
 // Telas onde o pill deve aparecer — Home, Cardápio, Detalhe do Item.
@@ -29,11 +33,17 @@ function isQualifyingRoute(pathname: string) {
   return false;
 }
 
-export default function EntrarBanner({ appName = 'Batata Top', onPress }: EntrarBannerProps) {
+export default function EntrarBanner({ appName = 'Batata Top', onPress, tabBarHeight }: EntrarBannerProps) {
   const pathname = usePathname();
   const translateY = useSharedValue(140); // começa fora da tela (embaixo)
   const wasShowing = useRef(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  // Cold start: getEffectiveSession() ainda não resolveu no primeiro render,
+  // então isLoggedIn começa false e o banner "pisca" aparecendo antes de a
+  // sessão real (usuário logado) chegar e escondê-lo de novo. `resolved` trava
+  // o banner escondido até a primeira checagem terminar — só então shouldShow
+  // passa a refletir o estado de login de verdade.
+  const [resolved, setResolved] = useState(false);
 
   // O banner é só pra quem não tá logado PRA UI — usa getEffectiveSession()
   // (considera o soft-logout, ver utils/authSession.js) em vez de checar a
@@ -47,7 +57,9 @@ export default function EntrarBanner({ appName = 'Batata Top', onPress }: Entrar
 
     async function refresh() {
       const session = await getEffectiveSession();
-      if (mounted) setIsLoggedIn(!!session?.user);
+      if (!mounted) return;
+      setIsLoggedIn(!!session?.user);
+      setResolved(true);
     }
 
     refresh();
@@ -65,7 +77,9 @@ export default function EntrarBanner({ appName = 'Batata Top', onPress }: Entrar
   }, []);
 
   const qualifying = isQualifyingRoute(pathname);
-  const shouldShow = qualifying && !isLoggedIn;
+  // `resolved` entra na conta pra não mostrar o banner num "falso deslogado"
+  // durante a checagem inicial da sessão (ver comentário no useState acima).
+  const shouldShow = resolved && qualifying && !isLoggedIn;
 
   useEffect(() => {
     const cameFromShowing = wasShowing.current;
@@ -107,7 +121,7 @@ export default function EntrarBanner({ appName = 'Batata Top', onPress }: Entrar
 
   return (
     <Animated.View
-      style={[styles.wrap, rStyle]}
+      style={[styles.wrap, { bottom: tabBarHeight + 8 }, rStyle]}
       pointerEvents={shouldShow ? 'auto' : 'none'}
     >
       <Pressable style={styles.card} onPress={onPress}>
@@ -123,7 +137,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 16,
     right: 16,
-    bottom: 85, // mesma faixa do CartBar — ver aviso sobre sobreposição
     zIndex: 890,
   },
   card: {

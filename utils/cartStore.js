@@ -3,6 +3,11 @@ import { useState, useEffect } from 'react';
 let cart = [];
 const listeners = new Set();
 
+// Flag separada pra esconder o botão flutuante "ver carrinho" em telas
+// específicas (ex: product detail), sem mexer no array do carrinho em si.
+let floatingHidden = false;
+const floatingListeners = new Set();
+
 export const cartStore = {
   getCart() {
     return cart;
@@ -13,6 +18,18 @@ export const cartStore = {
   },
   emit() {
     listeners.forEach((l) => l([...cart]));
+  },
+  isFloatingHidden() {
+    return floatingHidden;
+  },
+  subscribeFloating(listener) {
+    floatingListeners.add(listener);
+    return () => floatingListeners.delete(listener);
+  },
+  setFloatingHidden(hidden) {
+    if (floatingHidden === hidden) return;
+    floatingHidden = hidden;
+    floatingListeners.forEach((l) => l(floatingHidden));
   },
   addToCart(product) {
     const qty = product.quantidade || product.quantity || 1;
@@ -56,9 +73,14 @@ export const cartStore = {
 
 export function useCart() {
   const [items, setItems] = useState(cartStore.getCart());
+  const [hideFloating, setHideFloatingState] = useState(cartStore.isFloatingHidden());
 
   useEffect(() => {
     return cartStore.subscribe(setItems);
+  }, []);
+
+  useEffect(() => {
+    return cartStore.subscribeFloating(setHideFloatingState);
   }, []);
 
   return {
@@ -69,5 +91,9 @@ export function useCart() {
     remove: (id) => cartStore.removeFromCart(id),
     updateQty: (id, q) => cartStore.updateQuantity(id, q),
     clear: () => cartStore.clearCart(),
+    // Telas como o product detail usam isso pra esconder o botão
+    // flutuante "ver carrinho" enquanto estão em foco.
+    hideFloating,
+    setHideFloating: (hidden) => cartStore.setFloatingHidden(hidden),
   };
 }

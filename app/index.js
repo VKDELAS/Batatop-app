@@ -12,15 +12,18 @@ import {
   Platform,
   Alert,
   Clipboard,
+  Dimensions,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { Image as ExpoImage } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, memo } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { useProductRanking } from './hooks/useProductRanking';
 import BannerCarousel from '../components/BannerCarousel';
+import CategoriasFlutuantes from '../components/CategoriasFlutuantes';
+import { CATEGORIAS, handleCategoriaPress } from '../constants/categorias';
 import {
   useScrollHandler,
   useHeaderHeight,
@@ -29,6 +32,27 @@ import {
   HEADER_ANIM_DURATION,
   HEADER_EASING,
 } from './_layout';
+
+// ─── Cupom (dimensões do card-ticket) ─────────────────────────────────────────
+const CUPOM_CARD_WIDTH = 304;
+const CUPOM_CARD_HEIGHT = 168;
+const CUPOM_GAP = 14;
+const CUPOM_LEFT_WIDTH = 162; // painel laranja um pouco maior que o creme
+const CUPOM_RIGHT_WIDTH = CUPOM_CARD_WIDTH - CUPOM_LEFT_WIDTH;
+const CUPOM_SEAM_WIDTH = 22; // largura só da faixa dos furinhos/tracejado (fica por cima, não ocupa espaço no layout)
+
+// ─── Grid "Batatas mais pedidas" (2 colunas, largura fixa calculada) ──────────
+const PROD_GRID_GAP = 14;
+const PROD_CARD_WIDTH = (Dimensions.get('window').width - SPACING[6] * 2 - PROD_GRID_GAP) / 2;
+const PROD_IMG_HEIGHT = PROD_CARD_WIDTH * 0.9;
+
+// cores fixas do "ticket" — não vêm do theme pq o cupom tem identidade própria
+// (laranja + creme), igual ao cartão de cupom do iFood
+const CUPOM_LARANJA = '#FFA412';
+const CUPOM_LARANJA_ESCURO = '#E08900';
+const CUPOM_CREME = '#FFF3DC';
+const CUPOM_MARROM = '#5C3D0A';
+const CUPOM_MARROM_CLARO = '#8A6A3B';
 
 // ─── Pressable com scale ───────────────────────────────────────────────────────
 function PressableScale({ children, onPress, style }) {
@@ -45,11 +69,16 @@ function PressableScale({ children, onPress, style }) {
   );
 }
 
-// ─── Cupom Card (card branco, borda amarela, botão fica verde ao copiar) ──────
-function CupomCard({ codigo, desconto, descricao, validade }) {
+// ─── Cupom Card (ticket laranja/creme, com "furos" no meio e código copiável) ─
+// Array só pra desenhar a linha pontilhada vertical do meio do ticket "na mão"
+// (mais confiável entre plataformas do que confiar no borderStyle:'dashed'
+// do RN, que no Android às vezes ignora o tracejado).
+const CUPOM_DASHES = Array.from({ length: 9 });
+
+function CupomCard({ codigo, valor, unidade, descricaoDesconto, validade, usoLabel, mensagem }) {
   const [copiado, setCopiado] = useState(false);
   const scaleAnim = useRef(new Animated.Value(1)).current;
-  const corAnim = useRef(new Animated.Value(0)).current; // 0 = amarelo, 1 = verde
+  const corAnim = useRef(new Animated.Value(0)).current; // 0 = creme normal, 1 = verde copiado
 
   const copiarCodigo = () => {
     if (Clipboard && Clipboard.setString) {
@@ -61,7 +90,7 @@ function CupomCard({ codigo, desconto, descricao, validade }) {
       } catch (_) {}
     }
     Animated.sequence([
-      Animated.timing(scaleAnim, { toValue: 0.9, duration: 80, useNativeDriver: true }),
+      Animated.timing(scaleAnim, { toValue: 0.95, duration: 80, useNativeDriver: true }),
       Animated.spring(scaleAnim, { toValue: 1, friction: 4, useNativeDriver: true }),
     ]).start();
     Animated.timing(corAnim, { toValue: 1, duration: 200, useNativeDriver: false }).start();
@@ -73,111 +102,156 @@ function CupomCard({ codigo, desconto, descricao, validade }) {
     }, 2000);
   };
 
-  const botaoBg = corAnim.interpolate({
+  const boxBg = corAnim.interpolate({ inputRange: [0, 1], outputRange: ['#FFFFFF', '#22C55E'] });
+  const boxBorda = corAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['#FFFFFF', '#22C55E'],
+    outputRange: [CUPOM_LARANJA, '#22C55E'],
   });
-  const botaoBorda = corAnim.interpolate({
+  const boxTexto = corAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [COLORS.primary, '#22C55E'],
+    outputRange: [CUPOM_LARANJA_ESCURO, '#FFFFFF'],
   });
-  const botaoTexto = corAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [COLORS.primary, '#FFFFFF'],
-  });
-  const botaoIcone = copiado ? '#FFFFFF' : COLORS.primary;
+
+  const ehPercentual = unidade === '%';
 
   return (
     <View style={s.cupomCardShadow}>
       <View style={s.cupomCard}>
-        <LinearGradient
-          colors={['transparent', COLORS.primary, COLORS.primary, 'transparent']}
-          locations={[0, 0.15, 0.85, 1]}
-          style={s.cupomAccent}
-        />
+        {/* ── Metade esquerda: laranja, com o valor do desconto em destaque ── */}
+        <View style={s.cupomLeftPanel}>
+          {/* decoração de fundo — só uns ícones bem apagados espalhados, sem
+              atrapalhar a leitura */}
+          <Ionicons name="fast-food" size={46} color="#FFFFFF" style={s.cupomDecorA} />
+          <Ionicons name="pricetag" size={30} color="#FFFFFF" style={s.cupomDecorB} />
+          <Ionicons name="sparkles" size={22} color="#FFFFFF" style={s.cupomDecorC} />
 
-        <View style={s.cupomTopRow}>
-          <Text style={s.cupomCodigo} numberOfLines={1}>{codigo}</Text>
-          <Pressable onPress={copiarCodigo} hitSlop={8}>
-            {/* Animated.View de fora só cuida do scale (native driver).
-                A de dentro só cuida das cores (JS driver). Cada uma no seu
-                node — é isso que evita o erro de misturar driver native/JS
-                no mesmo Animated.View. */}
+          <View style={s.cupomBadge}>
+            <Ionicons name="pricetag" size={11} color={CUPOM_LARANJA_ESCURO} />
+            <Text style={s.cupomBadgeText}>CUPOM DE{'\n'}DESCONTO</Text>
+          </View>
+
+          <View style={s.cupomValorRow}>
+            {!ehPercentual && <Text style={s.cupomValorPrefixo}>{unidade}</Text>}
+            <Text style={s.cupomValorNum}>{valor}</Text>
+            {ehPercentual && <Text style={s.cupomValorSimbolo}>%</Text>}
+          </View>
+          <Text style={s.cupomOff}>OFF</Text>
+
+          <View style={s.cupomLeftDivider} />
+          <Text style={s.cupomLeftDesc}>{descricaoDesconto}</Text>
+        </View>
+
+        {/* ── Metade direita: creme, com código, validade e uso ── */}
+        <View style={s.cupomRightPanel}>
+          <Ionicons name="star" size={20} color={CUPOM_LARANJA} style={s.cupomDecorD} />
+
+          <View style={s.cupomCodigoLabelRow}>
+            <Ionicons name="caret-back" size={9} color={CUPOM_MARROM_CLARO} />
+            <Text style={s.cupomCodigoLabel}>USE O CÓDIGO</Text>
+            <Ionicons name="caret-forward" size={9} color={CUPOM_MARROM_CLARO} />
+          </View>
+
+          <Pressable onPress={copiarCodigo} hitSlop={6}>
             <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-              <Animated.View
-                style={[s.cupomBotao, { backgroundColor: botaoBg, borderColor: botaoBorda }]}
-              >
-                <Ionicons name={copiado ? 'checkmark' : 'copy-outline'} size={12} color={botaoIcone} />
-                <Animated.Text style={[s.cupomBotaoText, { color: botaoTexto }]}>
-                  {copiado ? 'Copiado!' : 'Copiar'}
+              <Animated.View style={[s.cupomCodigoBox, { backgroundColor: boxBg, borderColor: boxBorda }]}>
+                {copiado ? (
+                  <Ionicons name="checkmark" size={13} color="#FFFFFF" style={{ marginRight: 4 }} />
+                ) : null}
+                <Animated.Text style={[s.cupomCodigoTexto, { color: boxTexto }]} numberOfLines={1}>
+                  {copiado ? 'COPIADO!' : codigo}
                 </Animated.Text>
               </Animated.View>
             </Animated.View>
           </Pressable>
+
+          <View style={s.cupomInfoLine} />
+          <View style={s.cupomInfoRow}>
+            <Text style={s.cupomInfoLabel}>VÁLIDO ATÉ</Text>
+            <Text style={s.cupomInfoValor}>{validade}</Text>
+          </View>
+
+          <View style={s.cupomInfoLine} />
+          <View style={s.cupomInfoRow}>
+            <Text style={s.cupomInfoLabel}>{usoLabel}</Text>
+            <Text style={s.cupomInfoValorForte}>Aproveite!</Text>
+          </View>
+
+          <View style={s.cupomMensagemPill}>
+            <Ionicons name="heart" size={12} color={CUPOM_LARANJA} />
+            <Text style={s.cupomMensagemText} numberOfLines={1}>{mensagem}</Text>
+          </View>
         </View>
 
-        <Text style={s.cupomDesconto}>
-          <Text style={s.cupomDescontoValor}>{desconto} </Text>
-          {descricao}
-        </Text>
-
-        <Text style={s.cupomValidade}>{validade}</Text>
+        {/* ── Costura: fica por CIMA (absolute), centrada exatamente na fronteira
+             entre o laranja e o creme — assim o tracejado nunca fica deslocado
+             em relação à cor, independente da largura dos painéis ── */}
+        <View style={s.cupomSeam} pointerEvents="none">
+          <View style={s.cupomNotchTop} />
+          <View style={s.cupomDashedCol}>
+            {CUPOM_DASHES.map((_, i) => (
+              <View key={i} style={s.cupomDash} />
+            ))}
+          </View>
+          <View style={s.cupomNotchBottom} />
+        </View>
       </View>
     </View>
   );
 }
 
-// ─── Card de Produto (Mais Pedidos) ───────────────────────────────────────────
-function ProdutoCard({ produto, index }) {
+// ─── Fallbacks de imagem por categoria (fixos — não recriar a cada render) ────
+const PROD_IMG_FALLBACKS = {
+  batatas: 'https://images.unsplash.com/photo-1518013391915-e40643a1bce1?w=600',
+  bebidas: 'https://images.unsplash.com/photo-1544145945-f904253d0c7b?w=600',
+  macarrao: 'https://images.unsplash.com/photo-1551183053-bf91a1d81141?w=600',
+};
+const MINI_IMG_FALLBACKS = {
+  batatas: 'https://images.unsplash.com/photo-1518013391915-e40643a1bce1?w=400',
+  bebidas: 'https://images.unsplash.com/photo-1544145945-f904253d0c7b?w=400',
+  macarrao: 'https://images.unsplash.com/photo-1551183053-bf91a1d81141?w=400',
+};
+
+// ─── Card de Produto (Batatas mais pedidas) ───────────────────────────────────
+const ProdutoCard = memo(function ProdutoCard({ produto }) {
   const router = useRouter();
   const [useFallback, setUseFallback] = useState(false);
 
-  const FALLBACKS = {
-    batatas: 'https://images.unsplash.com/photo-1518013391915-e40643a1bce1?w=600',
-    bebidas: 'https://images.unsplash.com/photo-1544145945-f904253d0c7b?w=600',
-    macarrao: 'https://images.unsplash.com/photo-1551183053-bf91a1d81141?w=600',
-  };
-
   const imageSource = useFallback
-    ? { uri: FALLBACKS[produto.categoria?.toLowerCase()] || FALLBACKS.batatas }
+    ? { uri: PROD_IMG_FALLBACKS[produto.categoria?.toLowerCase()] || PROD_IMG_FALLBACKS.batatas }
     : { uri: produto.imagem };
-
-  const rank = produto.ranking ?? index + 1;
 
   return (
     <PressableScale onPress={() => router.push(`/produto/${produto.id}`)}>
       <View style={s.prodCard}>
         {/* Imagem */}
         <View style={s.prodImgWrapper}>
-          <Image
+          <ExpoImage
             source={imageSource}
             style={s.prodImg}
+            cachePolicy="memory-disk"
             onError={() => setUseFallback(true)}
           />
           <View style={s.prodOverlay} />
-          <View style={[s.rankBadge, rank <= 3 && s.rankBadgeTop]}>
-            <Text style={s.rankBadgeText}>#{rank}</Text>
-          </View>
         </View>
 
         {/* Info */}
         <View style={s.prodInfo}>
-          <View style={s.prodInfoLeft}>
-            <Text style={s.prodNome} numberOfLines={1}>{produto.nome}</Text>
-            <Text style={s.prodDesc} numberOfLines={1}>{produto.descricao}</Text>
-            <View style={s.prodTags}>
-              <View style={s.prodTag}>
-                <Ionicons name="time-outline" size={10} color={COLORS.textMuted} />
-                <Text style={s.prodTagText}>{produto.tempo} min</Text>
-              </View>
-              <View style={s.prodTag}>
-                <Ionicons name="star" size={10} color={COLORS.primary} />
-                <Text style={s.prodTagText}>{produto.avaliacoes || '4.8'}</Text>
-              </View>
+          <View style={s.prodTitleGroup}>
+            <Text style={s.prodNome} numberOfLines={2}>{produto.nome}</Text>
+            <Text style={s.prodDesc} numberOfLines={2}>{produto.descricao}</Text>
+          </View>
+          <View style={s.prodTags}>
+            <View style={s.prodTag}>
+              <Ionicons name="time-outline" size={10} color={COLORS.textMuted} />
+              <Text style={s.prodTagText}>{produto.tempo} min</Text>
+            </View>
+            <View style={s.prodTag}>
+              <Ionicons name="star" size={10} color={COLORS.primary} />
+              <Text style={s.prodTagText}>{produto.avaliacoes || '4.8'}</Text>
             </View>
           </View>
-          <View style={s.prodInfoRight}>
-            <Text style={s.prodPreco}>{produto.precoFormatado}</Text>
+          <View style={s.prodFooter}>
+            <Text style={s.prodPreco} numberOfLines={1}>{produto.precoFormatado}</Text>
             <View style={s.addBtn}>
               <Ionicons name="add" size={16} color={COLORS.background} />
             </View>
@@ -186,31 +260,26 @@ function ProdutoCard({ produto, index }) {
       </View>
     </PressableScale>
   );
-}
+});
 
 // ─── Card Horizontal (Destaques) ──────────────────────────────────────────────
-function DestaqueMiniCard({ produto }) {
+const DestaqueMiniCard = memo(function DestaqueMiniCard({ produto }) {
   const router = useRouter();
   const [useFallback, setUseFallback] = useState(false);
 
-  const FALLBACKS = {
-    batatas: 'https://images.unsplash.com/photo-1518013391915-e40643a1bce1?w=400',
-    bebidas: 'https://images.unsplash.com/photo-1544145945-f904253d0c7b?w=400',
-    macarrao: 'https://images.unsplash.com/photo-1551183053-bf91a1d81141?w=400',
-  };
-
   const imageSource = useFallback
-    ? { uri: FALLBACKS[produto.categoria?.toLowerCase()] || FALLBACKS.batatas }
+    ? { uri: MINI_IMG_FALLBACKS[produto.categoria?.toLowerCase()] || MINI_IMG_FALLBACKS.batatas }
     : { uri: produto.imagem };
 
   return (
     <PressableScale onPress={() => router.push(`/produto/${produto.id}`)}>
       <View style={s.miniCard}>
         <View style={s.miniImgWrapper}>
-          <Image
+          <ExpoImage
             source={imageSource}
             style={s.miniImg}
-            resizeMode="cover"
+            contentFit="cover"
+            cachePolicy="memory-disk"
             onError={() => setUseFallback(true)}
           />
         </View>
@@ -238,125 +307,8 @@ function DestaqueMiniCard({ produto }) {
       </View>
     </PressableScale>
   );
-}
+});
 
-// ─── Categorias (ícones 3D locais) ────────────────────────────────────────────
-const CATEGORIAS = [
-  { label: 'Cardápio',        icon: require('../assets/icones3d/icone cardapio.png'),         route: '/cardapio' },
-  { label: 'Batatas',         icon: require('../assets/icones3d/icone batata.png'),          cat: 'Batatas'  },
-  { label: 'Macarrão',        icon: require('../assets/icones3d/icone macarrao.png'),         cat: 'Macarrão' },
-  { label: 'Bebidas', icon: require('../assets/icones3d/icone bebidas geladas.png'),  cat: 'Bebidas'  },
-];
-
-// ─── Barra flutuante de categorias (aparece quando a grid de categorias sai da tela) ──
-// Literalmente a MESMA animação do header (mesma duração, mesma curva, mesmo
-// esquema translateY+opacity via native driver) — só que ela é 100%
-// absolute/overlay, então nunca empurra o resto do conteúdo (quem empurra é
-// só o spacer do header, lá em cima).
-function CategoriasFlutuantes({ scrollY, categoriasBottomY, headerHidden, router }) {
-  const BAR_SLIDE_DISTANCE = 70; // ~altura da própria barra — sobe/desce igual o header sobe/desce a sua altura
-
-  // hiddenAnim segue a MESMA convenção do headerAnim lá no _layout.js:
-  // 0 = visível, 1 = escondida.
-  const hiddenAnim = useRef(new Animated.Value(1)).current;
-  const visibleRef = useRef(false);
-
-  // headerHidden é um boolean ESTÁVEL (só muda quando o header já terminou de
-  // sumir/aparecer) — é o que evita essa barra decidir mostrar/esconder no
-  // meio da transição do header e desfazer a própria animação no caminho.
-  const headerHiddenRef = useRef(headerHidden);
-  useEffect(() => {
-    headerHiddenRef.current = headerHidden;
-  }, [headerHidden]);
-
-  const animateTo = (shouldShow) => {
-    Animated.timing(hiddenAnim, {
-      toValue: shouldShow ? 0 : 1,
-      duration: HEADER_ANIM_DURATION,
-      easing: HEADER_EASING,
-      useNativeDriver: true,
-    }).start();
-  };
-
-  useEffect(() => {
-    if (categoriasBottomY == null) return;
-    const id = scrollY.addListener(({ value }) => {
-      const visibleNow = visibleRef.current;
-      let shouldShow = visibleNow;
-
-      if (!visibleNow) {
-        // só aparece se o header já sumiu E já passamos da seção de categorias
-        if (headerHiddenRef.current && value > categoriasBottomY + HEADER_HYSTERESIS) {
-          shouldShow = true;
-        }
-      } else {
-        // esconde se o header voltou a aparecer OU se voltamos pra cima da seção
-        if (!headerHiddenRef.current || value < categoriasBottomY - HEADER_HYSTERESIS) {
-          shouldShow = false;
-        }
-      }
-
-      if (shouldShow !== visibleNow) {
-        visibleRef.current = shouldShow;
-        animateTo(shouldShow);
-      }
-    });
-    return () => scrollY.removeListener(id);
-  }, [categoriasBottomY]);
-
-  // Se o header voltar a aparecer enquanto a barra tava visível, some com ela
-  // na hora — sempre pro extremo (0 ou 1), nunca fica parada num valor parcial.
-  useEffect(() => {
-    if (!headerHidden && visibleRef.current) {
-      visibleRef.current = false;
-      animateTo(false);
-    }
-  }, [headerHidden]);
-
-  if (categoriasBottomY == null) return null;
-
-  const translateY = hiddenAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, -BAR_SLIDE_DISTANCE],
-  });
-
-  const opacity = hiddenAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, 0],
-  });
-
-  return (
-    <Animated.View
-      pointerEvents="box-none"
-      style={[s.miniCatWrap, { opacity, transform: [{ translateY }] }]}
-    >
-      <SafeAreaView edges={['top']} style={{ backgroundColor: 'transparent' }}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={s.miniCatRow}
-        >
-          {CATEGORIAS.map((cat) => (
-            <Pressable
-              key={cat.label}
-              style={s.miniCatPill}
-              onPress={() =>
-                cat.route
-                  ? router.push(cat.route)
-                  : router.push({ pathname: '/cardapio', params: { categoria: cat.cat } })
-              }
-            >
-              <View style={s.miniCatPillIcon}>
-                <Image source={cat.icon} style={s.miniCatPillIconImg} resizeMode="contain" />
-              </View>
-              <Text style={s.miniCatPillLabel} numberOfLines={1}>{cat.label}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      </SafeAreaView>
-    </Animated.View>
-  );
-}
 
 // ─── Tela Principal ────────────────────────────────────────────────────────────
 export default function Home() {
@@ -384,12 +336,68 @@ export default function Home() {
   );
 
   const disponiveis = produtos.filter(p => p.disponivel);
-  const maisPedidos = disponiveis.slice(0, 4);
-  const destaques = disponiveis.slice(0, 6);
+
+  // "Batatas mais pedidas" é só batata — antes pegava os 6 primeiros do
+  // ranking geral (`disponiveis.slice(0, 6)`), o que deixava entrar Macarrão
+  // no meio porque o ranking é por vendas totais, sem separar categoria.
+  const normalizarCategoria = (str) =>
+    (str || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+  const maisPedidos = disponiveis
+    .filter((p) => normalizarCategoria(p.categoria).includes('batata'))
+    .slice(0, 6);
+
+  const maisPedidosMacarrao = disponiveis
+    .filter((p) => normalizarCategoria(p.categoria).includes('macarrao'))
+    .slice(0, 6);
+
+  // Destaques: antes pegava só os 6 primeiros de `disponiveis` (ordenado por
+  // ranking), o que na prática dava só batata porque elas dominam o topo do
+  // ranking geral. Agora intercala por categoria (1 de cada categoria por vez,
+  // respeitando o ranking dentro de cada uma) até fechar 6 itens, garantindo
+  // que categorias como Macarrão também apareçam nos destaques.
+  const destaques = (() => {
+    const porCategoria = {};
+    disponiveis.forEach((p) => {
+      const cat = p.categoria || 'Outros';
+      if (normalizarCategoria(cat).includes('bebida')) return; // exclui bebidas dos destaques
+      if (!porCategoria[cat]) porCategoria[cat] = [];
+      porCategoria[cat].push(p);
+    });
+
+    const categorias = Object.keys(porCategoria);
+    const resultado = [];
+    let i = 0;
+    while (resultado.length < 6 && categorias.some((cat) => porCategoria[cat][i])) {
+      categorias.forEach((cat) => {
+        if (porCategoria[cat][i] && resultado.length < 6) {
+          resultado.push(porCategoria[cat][i]);
+        }
+      });
+      i++;
+    }
+    return resultado;
+  })();
 
   const CUPONS = [
-    { codigo: 'BATATA5', desconto: 'R$5 OFF', descricao: 'em qualquer batata', validade: 'Válido até 31/07' },
-    { codigo: 'PRIMEIRA20', desconto: '20% OFF', descricao: 'na primeira compra', validade: 'Válido até 31/07' },
+    {
+      codigo: 'BATATA5',
+      valor: '5',
+      unidade: 'R$',
+      descricaoDesconto: 'em qualquer batata',
+      validade: '31/07/2026',
+      usoLabel: 'USO LIMITADO',
+      mensagem: 'Vem de batata!',
+    },
+    {
+      codigo: 'PRIMEIRA20',
+      valor: '20',
+      unidade: '%',
+      descricaoDesconto: 'na primeira compra',
+      validade: '31/07/2026',
+      usoLabel: 'USO ILIMITADO',
+      mensagem: 'Só na 1ª compra!',
+    },
   ];
 
   return (
@@ -405,7 +413,7 @@ export default function Home() {
         {/* Espaço reservado pro header — fixo, não empurra mais nada */}
         <View style={{ height: headerSpacerHeight }} />
 
-        {/* ══════════════════ CATEGORIAS (estilo iFood, grid 2x2) ══════════════════ */}
+        {/* ══════════════════ CATEGORIAS (estilo iFood, grid 3x2) ══════════════════ */}
         <View
           style={[s.section, { paddingTop: SPACING[4] }]}
           onLayout={(e) => setCategoriasBottomY(e.nativeEvent.layout.y + e.nativeEvent.layout.height)}
@@ -414,12 +422,9 @@ export default function Home() {
             {CATEGORIAS.map((cat) => (
               <Pressable
                 key={cat.label}
-                style={s.catGridItem}
-                onPress={() =>
-                  cat.route
-                    ? router.push(cat.route)
-                    : router.push({ pathname: '/cardapio', params: { categoria: cat.cat } })
-                }
+                style={[s.catGridItem, cat.disabled && s.catGridItemDisabled]}
+                disabled={cat.disabled}
+                onPress={() => handleCategoriaPress(router, cat)}
               >
                 <View style={s.catGridBox}>
                   <Image source={cat.icon} style={s.catGridIcon} resizeMode="contain" />
@@ -478,7 +483,7 @@ export default function Home() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={s.cupomRow}
             decelerationRate="fast"
-            snapToInterval={212}
+            snapToInterval={CUPOM_CARD_WIDTH + CUPOM_GAP}
             snapToAlignment="start"
           >
             {CUPONS.map((c) => (
@@ -489,7 +494,7 @@ export default function Home() {
 
         <View style={s.section}>
           <View style={s.sectionRow}>
-            <Text style={s.sectionTitle}>Mais pedidos</Text>
+            <Text style={s.sectionTitle}>Batatas mais pedidas</Text>
             <Pressable onPress={() => router.push('/cardapio')} style={s.verTodos}>
               <Text style={s.verTodosText}>Ver todos</Text>
               <Ionicons name="chevron-forward" size={13} color={COLORS.primary} />
@@ -501,9 +506,33 @@ export default function Home() {
               <ActivityIndicator size="large" color={COLORS.primary} />
             </View>
           ) : (
-            maisPedidos.map((p, i) => (
-              <ProdutoCard key={p.id} produto={p} index={i} />
-            ))
+            <View style={s.prodGrid}>
+              {maisPedidos.map((p, i) => (
+                <ProdutoCard key={p.id} produto={p} index={i} />
+              ))}
+            </View>
+          )}
+        </View>
+
+        <View style={s.section}>
+          <View style={s.sectionRow}>
+            <Text style={s.sectionTitle}>Macarrão mais pedidos</Text>
+            <Pressable onPress={() => router.push('/cardapio')} style={s.verTodos}>
+              <Text style={s.verTodosText}>Ver todos</Text>
+              <Ionicons name="chevron-forward" size={13} color={COLORS.primary} />
+            </Pressable>
+          </View>
+
+          {loading ? (
+            <View style={s.loader}>
+              <ActivityIndicator size="large" color={COLORS.primary} />
+            </View>
+          ) : (
+            <View style={s.prodGrid}>
+              {maisPedidosMacarrao.map((p, i) => (
+                <ProdutoCard key={p.id} produto={p} index={i} />
+              ))}
+            </View>
           )}
         </View>
 
@@ -554,7 +583,7 @@ const s = StyleSheet.create({
     fontSize: TYPOGRAPHY.sizes.sm,
   },
 
-  // ── CATEGORIAS (grid 2x2, estilo iFood — sem sombra/borda) ─────────────────
+  // ── CATEGORIAS (grid 3x2, estilo iFood — sem sombra/borda) ─────────────────
   catGrid: {
     paddingHorizontal: SPACING[6],
     flexDirection: 'row',
@@ -563,12 +592,15 @@ const s = StyleSheet.create({
     rowGap: SPACING[4],
   },
   catGridItem: {
-    width: '48%',
+    width: '30%', // 3 colunas (era 48% / 2 colunas)
     alignItems: 'center',
+  },
+  catGridItemDisabled: {
+    opacity: 0.5,
   },
   catGridBox: {
     width: '100%',
-    aspectRatio: 2.3, // era 1.88 — bem mais achatado, menos altura vertical
+    aspectRatio: 1.5, // era 2.3 (2 colunas) — mais quadrado pra caber 3 por linha
     borderRadius: RADIUS.xl,
     backgroundColor: COLORS.backgroundElevated,
     alignItems: 'center',
@@ -589,64 +621,6 @@ const s = StyleSheet.create({
     fontWeight: '700',
     fontSize: TYPOGRAPHY.sizes.sm,
     textAlign: 'center',
-  },
-
-  // ── BARRA FLUTUANTE DE CATEGORIAS (aparece ao sair da grid, estilo pill) ───
-  miniCatWrap: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 950,
-    backgroundColor: COLORS.background,
-    shadowColor: 'transparent',
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 0,
-  },
-  miniCatRow: {
-    flexDirection: 'row',
-    paddingHorizontal: SPACING[6],
-    paddingVertical: SPACING[3],
-    gap: SPACING[2],
-  },
-  miniCatPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.backgroundElevated,
-    borderRadius: RADIUS.full ?? 999,
-    paddingLeft: SPACING[1],
-    paddingRight: SPACING[4],
-    paddingVertical: SPACING[1],
-    gap: SPACING[2],
-    shadowColor: 'transparent',
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 0,
-  },
-  miniCatPillIcon: {
-    width: 48,
-    height: 35,
-    borderRadius: 24,
-    backgroundColor: COLORS.backgroundElevated,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: 'transparent',
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 0,
-  },
-  miniCatPillIconImg: {
-    width: '76%',
-    height: '76%',
-  },
-  miniCatPillLabel: {
-    color: COLORS.text,
-    fontWeight: '700',
-    fontSize: TYPOGRAPHY.sizes.sm,
   },
 
   // ── MINI CAROUSEL (Em alta) ───────────────────────────────────────────────
@@ -683,6 +657,7 @@ const s = StyleSheet.create({
     fontWeight: '700',
     fontSize: 13,
     lineHeight: 16,
+    height: 32, // fixo pra 2 linhas — evita card esticar quando nome é grande
   },
   miniPreco: {
     color: '#000000',
@@ -738,7 +713,7 @@ const s = StyleSheet.create({
   },
   cupomRow: {
     paddingHorizontal: SPACING[6],
-    gap: SPACING[3],
+    gap: CUPOM_GAP,
     paddingVertical: 4,
   },
   cupomQtd: {
@@ -755,93 +730,264 @@ const s = StyleSheet.create({
     fontWeight: '700',
   },
   cupomCardShadow: {
-    borderRadius: 16,
+    borderRadius: 18,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.07,
-    shadowRadius: 5,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 3,
   },
   cupomCard: {
-    width: 172,
-    height: 130,
-    borderRadius: 16,
-    backgroundColor: COLORS.backgroundCard,
-    padding: 14,
-    paddingLeft: 20,
-    position: 'relative',
-    overflow: 'hidden',
-    justifyContent: 'space-between',
-  },
-  // barra de acento à esquerda: em vez de ir de ponta a ponta (top:0/bottom:0)
-  // e deixar o overflow:hidden + borderRadius:16 do card cortar ela lá no
-  // fundo da curva, a barra agora já nasce e morre no MEIO da curva (inset
-  // de 8 = metade do borderRadius de 16). O fade do gradiente cuida só da
-  // pontinha final, bem curto, pra suavizar — quem define "onde sai" agora
-  // é o tamanho/posição da barra, não o gradiente.
-  cupomAccent: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 3,
-    borderRadius: 1.5,
-  },
-  cupomTopRow: {
+    width: CUPOM_CARD_WIDTH,
+    height: CUPOM_CARD_HEIGHT,
+    borderRadius: 18,
+    backgroundColor: CUPOM_CREME,
     flexDirection: 'row',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+
+  // ── metade esquerda (laranja) ──
+  cupomLeftPanel: {
+    width: CUPOM_LEFT_WIDTH,
+    backgroundColor: CUPOM_LARANJA,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    justifyContent: 'center',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
+    overflow: 'hidden',
   },
-  cupomCodigo: {
-    flexShrink: 1,
-    color: COLORS.primary,
-    fontWeight: '900',
-    fontSize: 16,
-    letterSpacing: 0.3,
-  },
-  cupomBotao: {
+  cupomBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    borderWidth: 1.3,
+    backgroundColor: '#FFFFFF',
     borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginBottom: 8,
   },
-  cupomBotaoText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  cupomDesconto: {
-    fontSize: 13,
-    lineHeight: 18,
-    color: COLORS.text,
-  },
-  cupomDescontoValor: {
+  cupomBadgeText: {
+    color: CUPOM_LARANJA_ESCURO,
+    fontSize: 8,
     fontWeight: '800',
+    lineHeight: 9,
+    textAlign: 'center',
   },
-  cupomValidade: {
-    fontSize: 11,
-    color: COLORS.textMuted,
+  cupomValorRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  cupomValorPrefixo: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 20,
+    marginBottom: 4,
+    marginRight: 2,
+  },
+  cupomValorNum: {
+    color: '#FFFFFF',
+    fontWeight: '900',
+    fontSize: 40,
+    lineHeight: 40,
+    letterSpacing: -1,
+  },
+  cupomValorSimbolo: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 20,
+    marginBottom: 4,
+    marginLeft: 1,
+  },
+  cupomOff: {
+    color: '#FFFFFF',
+    fontWeight: '900',
+    fontSize: 15,
+    letterSpacing: 1,
+    marginTop: -4,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  cupomLeftDivider: {
+    alignSelf: 'stretch',
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.4)',
+    marginBottom: 8,
+  },
+  cupomLeftDesc: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '600',
+    lineHeight: 13,
+    textAlign: 'center',
   },
 
-  // ── PRODUTO CARD (Mais Pedidos) ───────────────────────────────────────────
+  // ── costura central: overlay absoluto centrado exatamente na fronteira
+  // entre o painel laranja e o creme (não ocupa espaço no layout dos painéis,
+  // então o tracejado nunca fica deslocado em relação à cor) ──
+  cupomSeam: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: CUPOM_LEFT_WIDTH - CUPOM_SEAM_WIDTH / 2,
+    width: CUPOM_SEAM_WIDTH,
+    alignItems: 'center',
+  },
+  cupomNotchTop: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: COLORS.background,
+    marginTop: -10,
+  },
+  cupomNotchBottom: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: COLORS.background,
+    marginBottom: -10,
+  },
+  cupomDashedCol: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'space-evenly',
+    paddingVertical: 4,
+  },
+  cupomDash: {
+    width: 2,
+    height: 5,
+    borderRadius: 1,
+    backgroundColor: CUPOM_LARANJA,
+    opacity: 0.35,
+  },
+
+  // ── metade direita (creme) ──
+  cupomRightPanel: {
+    width: CUPOM_RIGHT_WIDTH,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    justifyContent: 'space-between',
+    overflow: 'hidden',
+  },
+  cupomCodigoLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+  },
+  cupomCodigoLabel: {
+    color: CUPOM_MARROM,
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  cupomCodigoBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: CUPOM_LARANJA,
+    borderRadius: 7,
+    paddingVertical: 5,
+    marginTop: 4,
+  },
+  cupomCodigoTexto: {
+    color: CUPOM_LARANJA_ESCURO,
+    fontWeight: '900',
+    fontSize: 13,
+    letterSpacing: 0.4,
+  },
+  cupomInfoLine: {
+    height: 1,
+    backgroundColor: 'rgba(92,61,10,0.12)',
+  },
+  cupomInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  cupomInfoLabel: {
+    color: CUPOM_MARROM_CLARO,
+    fontSize: 7.5,
+    fontWeight: '700',
+    letterSpacing: 0.1,
+  },
+  cupomInfoValor: {
+    color: CUPOM_MARROM,
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  cupomInfoValorForte: {
+    color: CUPOM_MARROM,
+    fontSize: 9,
+    fontWeight: '900',
+  },
+  cupomMensagemPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+  },
+  cupomMensagemText: {
+    flex: 1,
+    color: CUPOM_MARROM,
+    fontSize: 7.5,
+    fontWeight: '700',
+  },
+
+  // ── decoração de fundo (ícones bem apagados, só textura) ──
+  cupomDecorA: {
+    position: 'absolute',
+    top: -12,
+    right: -14,
+    opacity: 0.13,
+    transform: [{ rotate: '20deg' }],
+  },
+  cupomDecorB: {
+    position: 'absolute',
+    bottom: 6,
+    left: -10,
+    opacity: 0.12,
+    transform: [{ rotate: '-18deg' }],
+  },
+  cupomDecorC: {
+    position: 'absolute',
+    top: 34,
+    right: 8,
+    opacity: 0.14,
+  },
+  cupomDecorD: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    opacity: 0.1,
+    transform: [{ rotate: '15deg' }],
+  },
+
+  // ── GRID "Batatas mais pedidas" (2 colunas, largura fixa) ─────────────────
+  prodGrid: {
+    paddingHorizontal: SPACING[6],
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: PROD_GRID_GAP,
+  },
   prodCard: {
+    width: PROD_CARD_WIDTH,
     backgroundColor: COLORS.backgroundCard,
     borderRadius: RADIUS.xl,
     borderWidth: 1,
     borderColor: COLORS.border,
     overflow: 'hidden',
-    marginHorizontal: SPACING[6],
-    marginBottom: SPACING[3],
-    flexDirection: 'row',
-    height: 100,
     ...SHADOWS.sm,
   },
   prodImgWrapper: {
-    width: 100,
-    height: '100%',
+    width: '100%',
+    height: PROD_IMG_HEIGHT,
     position: 'relative',
   },
   prodImg: {
@@ -853,50 +999,29 @@ const s = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.1)',
   },
-  rankBadge: {
-    position: 'absolute',
-    top: SPACING[2],
-    left: SPACING[2],
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderRadius: RADIUS.sm,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-  },
-  rankBadgeTop: {
-    backgroundColor: COLORS.primary,
-  },
-  rankBadgeText: {
-    color: '#FFF',
-    fontWeight: '800',
-    fontSize: 10,
-  },
   prodInfo: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: SPACING[4],
-    paddingVertical: SPACING[3],
+    padding: SPACING[3],
+    gap: SPACING[2],
   },
-  prodInfoLeft: {
-    flex: 1,
-    marginRight: SPACING[3],
-    gap: SPACING[1],
+  prodTitleGroup: {
+    gap: 1,
   },
   prodNome: {
     color: COLORS.text,
     fontWeight: '700',
     fontSize: TYPOGRAPHY.sizes.sm,
+    lineHeight: 16,
+    height: 32,
   },
   prodDesc: {
     color: COLORS.textMuted,
     fontSize: TYPOGRAPHY.sizes.xs,
-    lineHeight: 16,
+    lineHeight: 14,
+    height: 28,
   },
   prodTags: {
     flexDirection: 'row',
     gap: SPACING[3],
-    marginTop: SPACING[1],
   },
   prodTag: {
     flexDirection: 'row',
@@ -908,16 +1033,20 @@ const s = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
   },
-  prodInfoRight: {
+  prodFooter: {
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING[2],
+    justifyContent: 'space-between',
   },
   prodPreco: {
-    color: COLORS.primary,
+    flexShrink: 1,
+    marginRight: SPACING[2],
+    color: '#000000',
     fontWeight: '800',
     fontSize: TYPOGRAPHY.sizes.base,
   },
   addBtn: {
+    flexShrink: 0,
     width: 28,
     height: 28,
     borderRadius: 14,

@@ -6,6 +6,34 @@
 
 ---
 
+## 0. Economia de Token / Formato de Resposta
+
+**Ao ler este arquivo:**
+- Não resuma nem repita o conteúdo deste CLAUDE.md na resposta. Confirme com uma linha curta (ex: "Li o contexto, pode mandar") e aplique as regras em silêncio.
+
+**Código:**
+- Ao editar um arquivo existente, mande só o trecho alterado (função/bloco + 2-3 linhas de contexto antes/depois), nunca o arquivo inteiro re-colado — a menos que eu peça explicitamente "manda o arquivo completo".
+- Não regere ou re-printe arquivos que não foram tocados só pra "dar contexto".
+- Não recrie do zero um componente/hook que já existe — edite o que já tem.
+
+**Explicações:**
+- Sem preâmbulo tipo "Claro! Vou te ajudar com isso" — vai direto na solução.
+- Não reexplique padrões/arquitetura já documentados aqui (soft-logout, `cartItemId`, fluxo de push, `ThemedAlert`, etc.) — só referencie a seção (ex: "segue o padrão da seção 11").
+- Headers markdown (`##`) só se a resposta tiver 3+ blocos distintos de conteúdo; senão, texto corrido ou lista simples.
+- Nada de "resumo final" repetindo o que já foi dito na própria resposta.
+
+**Ambiguidade:**
+- Se a tarefa for pequena ou já tiver um padrão documentado aqui, não pergunte — assume o padrão e segue.
+- Só pergunta se a ambiguidade puder causar retrabalho real (ex: mexer em pagamento, auth, ou schema do banco).
+
+**Modo Homem das Cavernas:**
+De agora em diante, remova palavras de preenchimento. Nada de enrolação. Resposta direta apenas. Use frases curtas de 3 a 6 palavras quando possível. Vá direto ao resultado. Não narre demais. Não explique mais do que o necessário.
+
+**Skill compactar:**
+Quando eu disser "COMPACTAR", resuma toda nossa conversa em 5 a 7 bullets com todo o contexto crítico, decisões e trechos essenciais. Formate de um jeito fácil de copiar e colar em um novo chat.
+
+---
+
 ## 1. Visão Geral
 
 O Batata Top é um aplicativo mobile desenvolvido com **Expo (SDK 54)** e **React Native**. Utiliza **Expo Router v6** para navegação baseada em arquivos (file-based routing) e **Supabase** como Backend-as-a-Service.
@@ -655,9 +683,3 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
-
-Modo Homem das Cavernas
-'De gora em diante, remova palavras de preenchimento. Nada de enrolação. Resposta direta apenas. Use frases curtas de 3 a 6 palavras quando possível. Va direto ao resultado. Nao narre demais. Nao explique mais do que o necessário.
-
-
-Skill compactar:Quando eu disser 'COMPACTAR', resuma toda nossa conversa em 5 a 7 bullets com todo o contexto crítico, decisões e trechos essenciais. Formate de um jeito fácil de copiar e colar em um novo chat.

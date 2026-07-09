@@ -10,15 +10,31 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../supabaseConfig';
 import * as Haptics from 'expo-haptics';
 
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://eucwoxjmjfqylyrqunwk.supabase.co';
+
+// Mesma lógica do useProdutos.js: se image_url já é uma URL completa, usa direto;
+// se não, monta a URL do bucket "Products" no Supabase Storage.
+function resolveImageUrl(image_url) {
+  if (!image_url) return null;
+  if (image_url.startsWith('http')) return image_url;
+  return `${SUPABASE_URL}/storage/v1/object/public/Products/${image_url.replace(/^\/products\//, '')}`;
+}
+
 const TABS = [
-  { key: 'batata',   label: 'Batatas',   color: '#D97706', icon: 'fast-food-outline' },
+  { key: 'batata',   label: 'Batatas',   color: '#D97706', icon: 'flame-outline' },
   { key: 'macarrao', label: 'Macarrão',  color: '#EA580C', icon: 'restaurant-outline' },
   { key: 'bebida',   label: 'Bebidas',   color: '#2563EB', icon: 'cafe-outline' },
   { key: 'adicionais', label: 'Adicionais', color: '#7C3AED', icon: 'add-circle-outline' },
 ];
 
-const EMPTY_PRODUCT = { name: '', description: '', price: '', image: '', category: 'batata', available: true };
-const EMPTY_ADICIONAL = { name: '', price: '' };
+const EMPTY_PRODUCT = { name: '', description: '', price: '', image_url: '', category: 'batata', available: true };
+const EMPTY_ADICIONAL = { name: '', price: '', adicional_categoria: null };
+
+const ADIC_CATEGORIAS = [
+  { key: 'proteinas', label: 'Proteínas Extra', color: '#DC2626' },
+  { key: 'molhos',    label: 'Molhos e Cremes', color: '#D97706' },
+  { key: 'queijos',   label: 'Queijos e Complementos', color: '#059669' },
+];
 
 export default function AdminProdutos() {
   const router = useRouter();
@@ -80,7 +96,7 @@ export default function AdminProdutos() {
         name: product.name || '',
         description: product.description || '',
         price: String(product.price || ''),
-        image: product.image || '',
+        image_url: product.image_url || '',
         category: product.category || 'batata',
         available: product.available !== false,
       });
@@ -96,7 +112,7 @@ export default function AdminProdutos() {
 
   // ─── Produto: Salvar ────────────────────────────────────────────
   const handleSaveProduct = async () => {
-    const { name, description, price, image, category, available } = prodForm;
+    const { name, description, price, image_url, category, available } = prodForm;
     if (!name.trim()) { Alert.alert('Atenção', 'Informe o nome do produto.'); return; }
     const priceNum = parseFloat(price.replace(',', '.'));
     if (isNaN(priceNum) || priceNum <= 0) { Alert.alert('Atenção', 'Preço inválido.'); return; }
@@ -107,14 +123,14 @@ export default function AdminProdutos() {
       if (editingProduct) {
         const { error } = await supabase.from('products').update({
           name: name.trim(), description: description.trim(),
-          price: priceNum, image: image.trim(), category, available,
+          price: priceNum, image_url: image_url.trim(), category, available,
         }).eq('id', editingProduct.id);
         if (error) throw error;
         productId = editingProduct.id;
       } else {
         const { data, error } = await supabase.from('products').insert({
           name: name.trim(), description: description.trim(),
-          price: priceNum, image: image.trim(), category, available: true,
+          price: priceNum, image_url: image_url.trim(), category, available: true,
         }).select().single();
         if (error) throw error;
         productId = data.id;
@@ -165,7 +181,7 @@ export default function AdminProdutos() {
 
   // ─── Adicional: Abrir modal ──────────────────────────────────────
   const openAdicModal = (a = null) => {
-    if (a) { setEditingAdic(a); setAdicForm({ name: a.name, price: String(a.price) }); }
+    if (a) { setEditingAdic(a); setAdicForm({ name: a.name, price: String(a.price), adicional_categoria: a.adicional_categoria || null }); }
     else { setEditingAdic(null); setAdicForm(EMPTY_ADICIONAL); }
     setAdicModalVisible(true);
   };
@@ -178,9 +194,9 @@ export default function AdminProdutos() {
     setSaving(true);
     try {
       if (editingAdic) {
-        await supabase.from('adicionais').update({ name: adicForm.name.trim(), price: priceNum }).eq('id', editingAdic.id);
+        await supabase.from('adicionais').update({ name: adicForm.name.trim(), price: priceNum, adicional_categoria: adicForm.adicional_categoria }).eq('id', editingAdic.id);
       } else {
-        await supabase.from('adicionais').insert({ name: adicForm.name.trim(), price: priceNum });
+        await supabase.from('adicionais').insert({ name: adicForm.name.trim(), price: priceNum, adicional_categoria: adicForm.adicional_categoria });
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setAdicModalVisible(false);
@@ -253,11 +269,18 @@ export default function AdminProdutos() {
             adicionais.length === 0 ? (
               <EmptyState icon="add-circle-outline" text="Nenhum adicional cadastrado" />
             ) : (
-              adicionais.map(a => (
+              adicionais.map(a => {
+                const catInfo = ADIC_CATEGORIAS.find(c => c.key === a.adicional_categoria);
+                return (
                 <View key={a.id} style={s.adicCard}>
                   <View style={{ flex: 1 }}>
                     <Text style={s.adicName}>{a.name}</Text>
                     <Text style={s.adicPrice}>R$ {Number(a.price).toFixed(2).replace('.', ',')}</Text>
+                    <View style={[s.catBadge, { backgroundColor: catInfo ? catInfo.color + '1A' : '#F3F4F6' }]}>
+                      <Text style={[s.catBadgeText, { color: catInfo ? catInfo.color : '#9CA3AF' }]}>
+                        {catInfo ? catInfo.label : 'Sem categoria'}
+                      </Text>
+                    </View>
                   </View>
                   <View style={s.cardActions}>
                     <Pressable style={s.iconBtn} onPress={() => openAdicModal(a)}>
@@ -268,7 +291,8 @@ export default function AdminProdutos() {
                     </Pressable>
                   </View>
                 </View>
-              ))
+                );
+              })
             )
           ) : (
             filteredProducts.length === 0 ? (
@@ -301,7 +325,7 @@ export default function AdminProdutos() {
             <Field label="Nome *" placeholder="Ex: Batata Strogonoff" value={prodForm.name} onChangeText={v => setProdForm(f => ({ ...f, name: v }))} />
             <Field label="Descrição" placeholder="Ingredientes, detalhes..." value={prodForm.description} onChangeText={v => setProdForm(f => ({ ...f, description: v }))} multiline />
             <Field label="Preço (R$) *" placeholder="0,00" value={prodForm.price} onChangeText={v => setProdForm(f => ({ ...f, price: v }))} keyboardType="decimal-pad" />
-            <Field label="URL da Imagem" placeholder="/products/foto.jpg ou https://..." value={prodForm.image} onChangeText={v => setProdForm(f => ({ ...f, image: v }))} />
+            <Field label="URL da Imagem" placeholder="/products/foto.jpg ou https://..." value={prodForm.image_url} onChangeText={v => setProdForm(f => ({ ...f, image_url: v }))} />
 
             <Text style={s.fieldLabel}>Categoria *</Text>
             <View style={s.categoryRow}>
@@ -319,16 +343,25 @@ export default function AdminProdutos() {
             {prodForm.category !== 'bebida' && adicionais.length > 0 && (
               <>
                 <Text style={s.fieldLabel}>Adicionais vinculados</Text>
-                <View style={s.adicList}>
-                  {adicionais.map(a => (
-                    <Pressable key={a.id} style={s.adicItem} onPress={() => toggleAdic(a.id)}>
-                      <View style={[s.checkbox, selectedAdicionais.includes(a.id) && { backgroundColor: '#FFB800', borderColor: '#FFB800' }]}>
-                        {selectedAdicionais.includes(a.id) && <Ionicons name="checkmark" size={12} color="#FFF" />}
+                {[...ADIC_CATEGORIAS, { key: null, label: 'Sem categoria' }].map(cat => {
+                  const grupo = adicionais.filter(a => (a.adicional_categoria || null) === cat.key);
+                  if (grupo.length === 0) return null;
+                  return (
+                    <View key={cat.label} style={{ marginBottom: 12 }}>
+                      <Text style={s.adicGroupLabel}>{cat.label}</Text>
+                      <View style={s.adicList}>
+                        {grupo.map(a => (
+                          <Pressable key={a.id} style={s.adicItem} onPress={() => toggleAdic(a.id)}>
+                            <View style={[s.checkbox, selectedAdicionais.includes(a.id) && { backgroundColor: '#FFB800', borderColor: '#FFB800' }]}>
+                              {selectedAdicionais.includes(a.id) && <Ionicons name="checkmark" size={12} color="#FFF" />}
+                            </View>
+                            <Text style={s.adicItemText}>{a.name} — R$ {Number(a.price).toFixed(2)}</Text>
+                          </Pressable>
+                        ))}
                       </View>
-                      <Text style={s.adicItemText}>{a.name} — R$ {Number(a.price).toFixed(2)}</Text>
-                    </Pressable>
-                  ))}
-                </View>
+                    </View>
+                  );
+                })}
               </>
             )}
 
@@ -351,6 +384,20 @@ export default function AdminProdutos() {
           <View style={s.modalBody}>
             <Field label="Nome *" placeholder="Ex: Bacon Extra" value={adicForm.name} onChangeText={v => setAdicForm(f => ({ ...f, name: v }))} />
             <Field label="Preço (R$) *" placeholder="0,00" value={adicForm.price} onChangeText={v => setAdicForm(f => ({ ...f, price: v }))} keyboardType="decimal-pad" />
+
+            <Text style={s.fieldLabel}>Categoria</Text>
+            <View style={s.categoryRow}>
+              {ADIC_CATEGORIAS.map(cat => (
+                <Pressable
+                  key={cat.key}
+                  style={[s.categoryBtn, adicForm.adicional_categoria === cat.key && { backgroundColor: cat.color, borderColor: cat.color }]}
+                  onPress={() => setAdicForm(f => ({ ...f, adicional_categoria: f.adicional_categoria === cat.key ? null : cat.key }))}
+                >
+                  <Text style={[s.categoryBtnText, adicForm.adicional_categoria === cat.key && { color: '#FFF' }]}>{cat.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+
             <Pressable style={[s.saveBtn, { backgroundColor: '#7C3AED' }, saving && { opacity: 0.7 }]} onPress={handleSaveAdic} disabled={saving}>
               {saving ? <ActivityIndicator color="#FFF" /> : <Text style={s.saveBtnText}>{editingAdic ? 'Salvar' : 'Criar Adicional'}</Text>}
             </Pressable>
@@ -362,10 +409,11 @@ export default function AdminProdutos() {
 }
 
 function ProductCard({ product, onEdit, onDelete, onToggle }) {
+  const resolvedImage = resolveImageUrl(product.image_url);
   return (
     <View style={s.prodCard}>
-      {product.image ? (
-        <Image source={{ uri: product.image }} style={s.prodImage} />
+      {resolvedImage ? (
+        <Image source={{ uri: resolvedImage }} style={s.prodImage} />
       ) : (
         <View style={[s.prodImage, s.prodImagePlaceholder]}>
           <Ionicons name="image-outline" size={24} color="#D1D5DB" />
@@ -432,7 +480,7 @@ const s = StyleSheet.create({
   addBtnText: { color: '#FFF', fontWeight: '800', fontSize: 13 },
 
   tabBar: { backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#F0F0F0', maxHeight: 58 },
-  tabContent: { paddingHorizontal: 12, paddingVertical: 10, gap: 8, flexDirection: 'row' },
+  tabContent: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 12, paddingVertical: 10, gap: 8, flexDirection: 'row' },
   tab: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 12, borderWidth: 1.5, borderColor: '#E5E7EB', backgroundColor: '#FFF' },
   tabText: { fontSize: 12, fontWeight: '700', color: '#6B7280' },
 
@@ -458,6 +506,9 @@ const s = StyleSheet.create({
   adicName: { fontSize: 14, fontWeight: '800', color: '#1A1A1A' },
   adicPrice: { fontSize: 13, fontWeight: '700', color: '#7C3AED', marginTop: 2 },
   cardActions: { flexDirection: 'row', gap: 8 },
+  catBadge: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginTop: 6 },
+  catBadgeText: { fontSize: 10, fontWeight: '800' },
+  adicGroupLabel: { fontSize: 11, fontWeight: '800', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
 
   modalContainer: { flex: 1, backgroundColor: '#F8F9FA' },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 18, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },

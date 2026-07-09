@@ -3,7 +3,7 @@ import {
   View, Text, StatusBar, StyleSheet, Pressable,
   ScrollView, Animated, Image, Easing,
 } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useRef, useEffect, useCallback, useMemo, createContext, useContext } from 'react';
@@ -12,6 +12,8 @@ import { useCart } from '../utils/cartStore';
 import { supabase } from '../supabaseConfig';
 import { getEffectiveSession, subscribeAuthUiChange, initAuthStateListener } from '../utils/authSession';
 import { getPendingAddress, subscribePendingAddressChange, formatPendingAddressLabel } from '../utils/pendingAddress';
+import { getPendingCartIntent, clearPendingCartIntent } from '../utils/pendingCartIntent';
+import { subscribeAuthSheetRequest } from '../utils/authSheetRequest';
 import { configureNotificationAudio } from '../utils/notificationSound';
 import AdminPushRegistration from '../components/AdminPushRegistration';
 import EntrarBanner from '../components/EntrarBanner';
@@ -62,6 +64,20 @@ export const useScrollHandler = () => {
 const HeaderHeightContext = createContext(175); // fallback seguro
 
 export const useHeaderHeight = () => useContext(HeaderHeightContext);
+
+/* ============================================================
+   TAB BAR HEIGHT CONTEXT
+   Mesma ideia do HeaderHeightContext, mas pra altura real (medida via
+   onLayout) da BottomTabBar. CartBar usa isso pra se posicionar sempre
+   relativo à altura real da tab bar — em vez de duplicar "85 + insets.bottom"
+   (o que quebrou depois que a tab bar passou a somar o inset de baixo: ver
+   seção do CLAUDE.md sobre timing de insets/resize no Android depois de
+   background/foreground). EntrarBanner recebe o valor via prop (não via
+   hook) pra evitar import circular com este arquivo.
+   ============================================================ */
+const TabBarHeightContext = createContext(70); // fallback seguro
+
+export const useTabBarHeight = () => useContext(TabBarHeightContext);
 
 /* ============================================================
    HEADER ANIM CONTEXT
@@ -323,7 +339,7 @@ function Header({ onHeightChange, onRegisterReset }) {
 
   const router   = useRouter();
   const pathname = usePathname();
-  const { count: totalItems } = useCart();
+  const { count: totalItems, add: addToCart } = useCart();
   const { setAnimation, setLastRoute } = useNavContext();
   const { scrollY } = useContext(ScrollYContext);
 
@@ -441,6 +457,22 @@ function Header({ onHeightChange, onRegisterReset }) {
       userRef.current = u;
       if (u) {
         fetchDefaultAddress(u.id);
+
+        // Item pendente de um "Adicionar" que foi barrado por gate de
+        // login no produto/[id].js (ver utils/pendingCartIntent.js). Este
+        // é o único ponto que roda pra QUALQUER caminho de login (e-mail,
+        // celular, cadastro, "continuar como") — os outros terminam em
+        // telas diferentes (login.js, codigo.js, telefone.js) que não têm
+        // e não precisam ter nenhuma ideia do fluxo de produto. Rodar só
+        // aqui também evita adicionar de novo à toa: applyUser(u) pode
+        // rodar mais de uma vez com usuário já logado (ex: refresh de
+        // token), mas a intenção já foi limpa na primeira consumida.
+        const pendingItems = getPendingCartIntent();
+        if (pendingItems) {
+          pendingItems.forEach(addToCart);
+          clearPendingCartIntent();
+        }
+
         Animated.parallel([
           Animated.timing(authRowOpacity,     { toValue: 0,   duration: 220, useNativeDriver: true }),
           Animated.timing(authRowTranslateY,  { toValue: -12, duration: 220, useNativeDriver: true }),
@@ -637,14 +669,15 @@ function Header({ onHeightChange, onRegisterReset }) {
 function CartBar() {
   const router   = useRouter();
   const pathname = usePathname();
-  const { count: totalItems, total } = useCart();
+  const { count: totalItems, total, hideFloating } = useCart();
   const subtotal = total / 100;
+  const tabBarHeight = useTabBarHeight();
 
   const translateY = useRef(new Animated.Value(120)).current;
   const wasVisible = useRef(false);
 
   const isCartPage = pathname.includes('cart') || pathname.includes('checkout');
-  const shouldShow = totalItems > 0 && !isCartPage;
+  const shouldShow = totalItems > 0 && !isCartPage && !hideFloating;
 
   useEffect(() => {
     if (shouldShow && !wasVisible.current) {
@@ -672,7 +705,7 @@ function CartBar() {
   });
 
   return (
-    <Animated.View style={[s.cartBar, { transform: [{ translateY }], opacity }]} pointerEvents={shouldShow ? 'auto' : 'none'}>
+    <Animated.View style={[s.cartBar, { bottom: tabBarHeight + 23, transform: [{ translateY }], opacity }]} pointerEvents={shouldShow ? 'auto' : 'none'}>
       <Pressable style={s.cartBarInner} onPress={() => router.push('/cart')}>
         <View style={s.cartBarLeft}>
           <View style={s.cartBarBadge}>
@@ -699,10 +732,11 @@ function getTabIndex(pathname) {
   return TAB_ORDER.findIndex((t) => t !== 'index' && pathname.includes(t));
 }
 
-function BottomTabBar() {
+function BottomTabBar({ onHeightChange }) {
   const router   = useRouter();
   const pathname = usePathname();
   const { setAnimation } = useNavContext();
+  const insets = useSafeAreaInsets();
 
   // Mesma regra que o Header já usa (isAuthPage) — a tab bar não deve
   // aparecer em cima da tela de login/cadastro nem da tela de endereços
@@ -736,7 +770,10 @@ function BottomTabBar() {
   };
 
   return (
-    <View style={s.tabBar}>
+    <View
+      style={[s.tabBar, { paddingBottom: 8 + insets.bottom }]}
+      onLayout={(e) => onHeightChange && onHeightChange(e.nativeEvent.layout.height)}
+    >
       {tabs.map((tab) => {
         const active = isActive(tab.name);
         return (
@@ -747,7 +784,6 @@ function BottomTabBar() {
               color={active ? '#FFB800' : '#A3A3A3'}
             />
             <Text style={[s.tabLabel, active && s.tabLabelActive]}>{tab.label}</Text>
-            {active && <View style={s.tabIndicator} />}
           </Pressable>
         );
       })}
@@ -765,12 +801,21 @@ const rootHeaderAnimCtxValue = { headerAnim: rootHeaderAnim, headerSpacerAnim: r
 
 export default function RootLayout() {
   const [headerHeight, setHeaderHeight] = useState(175);
+  const [tabBarHeight, setTabBarHeight] = useState(70);
   const [animation, setAnimation]       = useState('slide_from_right');
   const [lastRoute, setLastRoute]       = useState('/');
   const [headerHidden, setHeaderHiddenState] = useState(false);
   const [authSheetVisible, setAuthSheetVisible] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
   const resetHeaderRef = useRef(() => {});
+
+  // Permite que qualquer tela (ex: produto/[id].js, no gate de login do
+  // "Adicionar") peça pra abrir este mesmo AuthBottomSheet global sem
+  // precisar receber setAuthSheetVisible via prop — ver
+  // utils/authSheetRequest.js.
+  useEffect(() => {
+    return subscribeAuthSheetRequest(() => setAuthSheetVisible(true));
+  }, []);
 
   const scrollCtxValue = useRef({
     scrollY: rootScrollY,
@@ -797,6 +842,7 @@ export default function RootLayout() {
     <NavContext.Provider value={{ animation, setAnimation, lastRoute, setLastRoute }}>
     <ScrollYContext.Provider value={scrollCtxValue}>
     <HeaderHeightContext.Provider value={headerHeight}>
+    <TabBarHeightContext.Provider value={tabBarHeight}>
     <HeaderHiddenContext.Provider value={headerHiddenCtxValue}>
     <HeaderAnimContext.Provider value={rootHeaderAnimCtxValue}>
     <SafeAreaProvider>
@@ -828,8 +874,8 @@ export default function RootLayout() {
               />
             </View>
             <CartBar />
-            <BottomTabBar />
-            <EntrarBanner onPress={() => setAuthSheetVisible(true)} />
+            <BottomTabBar onHeightChange={setTabBarHeight} />
+            <EntrarBanner onPress={() => setAuthSheetVisible(true)} tabBarHeight={tabBarHeight} />
             <AuthBottomSheet visible={authSheetVisible} onClose={() => setAuthSheetVisible(false)} />
           </View>
         </>
@@ -837,6 +883,7 @@ export default function RootLayout() {
     </SafeAreaProvider>
     </HeaderAnimContext.Provider>
     </HeaderHiddenContext.Provider>
+    </TabBarHeightContext.Provider>
     </HeaderHeightContext.Provider>
     </ScrollYContext.Provider>
     </NavContext.Provider>
@@ -979,9 +1026,4 @@ const s = StyleSheet.create({
   },
   tabLabel:       { fontSize: 11, fontWeight: '600', color: '#A3A3A3', marginTop: 2 },
   tabLabelActive: { color: '#FFB800', fontWeight: '700' },
-  tabIndicator: {
-    position: 'absolute', top: -8,
-    width: 40, height: 3,
-    backgroundColor: '#FFB800', borderRadius: 2,
-  },
 });

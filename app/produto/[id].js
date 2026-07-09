@@ -11,12 +11,19 @@ import {
   Dimensions,
   TextInput,
   StatusBar,
+  AppState,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useState, useEffect } from 'react';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { supabase } from '../../supabaseConfig';
 import { useCart } from '../../utils/cartStore';
+import { getEffectiveSession } from '../../utils/authSession';
+import { setPendingCartIntent } from '../../utils/pendingCartIntent';
+import { requestAuthSheet } from '../../utils/authSheetRequest';
 import { COLORS, SHADOWS, RADIUS } from '../../constants/theme';
 
 const { width } = Dimensions.get('window');
@@ -43,21 +50,34 @@ function resolveImage(imageUrl, categoria) {
 export default function ProdutoDetail() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
-  const { add: addToCart } = useCart();
+  const { add: addToCart, setHideFloating } = useCart();
 
   const [produto, setProduto] = useState(null);
   const [adicionais, setAdicionais] = useState([]);
+  const [bebidas, setBebidas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [useFallback, setUseFallback] = useState(false);
   const [quantidade, setQuantidade] = useState(1);
   // { [adicionalId]: quantidade (0 = não selecionado) }
   const [adicionaisSelecionados, setAdicionaisSelecionados] = useState({});
+  // { [bebidaId]: quantidade (0 = não selecionado) } — só vira item do
+  // carrinho de fato quando a pessoa aperta "Adicionar" no rodapé.
+  const [bebidasSelecionadas, setBebidasSelecionadas] = useState({});
   const [observacoes, setObservacoes] = useState('');
+
+  // Padrão da seção 10 do CLAUDE.md — footer acompanha o teclado via valor
+  // nativo (imune a ciclos de background/foreground), nada de resize da
+  // janela ou Keyboard.addListener.
+  const { height: keyboardHeight } = useReanimatedKeyboardAnimation();
+  const footerAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: keyboardHeight.value }],
+  }));
 
   useEffect(() => {
     if (id) {
       fetchProduto();
       fetchAdicionais();
+      fetchBebidas();
     }
   }, [id]);
 
@@ -104,6 +124,24 @@ export default function ProdutoDetail() {
     }
   };
 
+  // Bebidas vêm de `products` (categoria "bebida"/"bebidas"), não da tabela
+  // de adicionais — cada uma entra no carrinho como item próprio.
+  const fetchBebidas = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .ilike('category', 'bebida%')
+        .eq('available', true)
+        .neq('id', id);
+
+      if (error) throw error;
+      setBebidas(data || []);
+    } catch (err) {
+      console.error('Erro ao buscar bebidas:', err);
+    }
+  };
+
   const incrementAdicional = (adicionalId) => {
     setAdicionaisSelecionados((prev) => ({
       ...prev,
@@ -123,10 +161,116 @@ export default function ProdutoDetail() {
     });
   };
 
+  const incrementBebida = (bebidaId) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setBebidasSelecionadas((prev) => ({
+      ...prev,
+      [bebidaId]: (prev[bebidaId] || 0) + 1,
+    }));
+  };
+
+  const decrementBebida = (bebidaId) => {
+    setBebidasSelecionadas((prev) => {
+      const current = prev[bebidaId] || 0;
+      if (current <= 1) {
+        const next = { ...prev };
+        delete next[bebidaId];
+        return next;
+      }
+      return { ...prev, [bebidaId]: current - 1 };
+    });
+  };
+
   const totalAdicionais = adicionais.reduce((acc, item) => {
     const qty = adicionaisSelecionados[item.id] || 0;
     return acc + item.price * qty;
   }, 0);
+
+  // Agrupa adicionais por adicional_categoria (ordem = primeira aparição no array)
+  const categoriasAdicionais = useMemo(() => {
+    const grupos = {};
+    const ordem = [];
+    adicionais.forEach((item) => {
+      const cat = item.adicional_categoria?.trim() || 'Outros';
+      if (!grupos[cat]) {
+        grupos[cat] = [];
+        ordem.push(cat);
+      }
+      grupos[cat].push(item);
+    });
+    return ordem.map((categoria) => ({ categoria, itens: grupos[categoria] }));
+  }, [adicionais]);
+
+  // Frases fixas para categorias comuns (estilo iFood) — 5 variações cada, uma é
+  // sorteada por categoria toda vez que a tela é aberta (rodízio)
+  const FRASES_CATEGORIA = {
+    molho: ['Que tal um molho?', 'Bora escolher um molho?', 'Um molhinho especial?', 'Qual molho vai ser?', 'Dá um toque com molho?'],
+    molhos: ['Que tal um molho?', 'Bora escolher um molho?', 'Um molhinho especial?', 'Qual molho vai ser?', 'Dá um toque com molho?'],
+    bebida: ['Bora escolher uma bebida?', 'Vai querer algo pra beber?', 'Que tal matar a sede?', 'Escolha sua bebida', 'Falta a bebida, hein?'],
+    bebidas: ['Bora escolher uma bebida?', 'Vai querer algo pra beber?', 'Que tal matar a sede?', 'Escolha sua bebida', 'Falta a bebida, hein?'],
+    borda: ['Vamos turbinar a borda?', 'Que tal recheiar a borda?', 'Borda recheada, bora?', 'Dá um up na borda?', 'Escolha sua borda'],
+    bordas: ['Vamos turbinar a borda?', 'Que tal recheiar a borda?', 'Borda recheada, bora?', 'Dá um up na borda?', 'Escolha sua borda'],
+    sabor: ['Qual vai ser o sabor?', 'Escolha o seu sabor', 'Bora escolher o sabor?', 'Qual sabor você quer?', 'Hora de escolher o sabor'],
+    sabores: ['Qual vai ser o sabor?', 'Escolha o seu sabor', 'Bora escolher o sabor?', 'Qual sabor você quer?', 'Hora de escolher o sabor'],
+    extra: ['Vai querer um extra?', 'Bora caprichar com um extra?', 'Que tal um extra?', 'Dá um upgrade extra?', 'Adiciona um extra?'],
+    extras: ['Vai querer um extra?', 'Bora caprichar com um extra?', 'Que tal um extra?', 'Dá um upgrade extra?', 'Adiciona um extra?'],
+    adicional: ['Bora dar um upgrade?', 'Que tal turbinar o pedido?', 'Vai querer adicionar algo?', 'Capricha no pedido?', 'Adiciona um extra especial?'],
+    adicionais: ['Bora dar um upgrade?', 'Que tal turbinar o pedido?', 'Vai querer adicionar algo?', 'Capricha no pedido?', 'Adiciona um extra especial?'],
+    queijo: ['Mais queijo, por favor?', 'Bora caprichar no queijo?', 'Um queijo a mais?', 'Reforça o queijo?', 'Queijo nunca é demais'],
+    queijos: ['Mais queijo, por favor?', 'Bora caprichar no queijo?', 'Um queijo a mais?', 'Reforça o queijo?', 'Queijo nunca é demais'],
+    carne: ['Reforça a carne?', 'Bora turbinar a carne?', 'Mais carne, por favor?', 'Dá um up na carne?', 'Capricha na carne?'],
+    carnes: ['Reforça a carne?', 'Bora turbinar a carne?', 'Mais carne, por favor?', 'Dá um up na carne?', 'Capricha na carne?'],
+    bacon: ['Bacon nunca é demais', 'Bora colocar bacon?', 'Um bacon a mais?', 'Que tal reforçar com bacon?', 'Dá um crocante com bacon?'],
+    acompanhamento: ['Que tal um acompanhamento?', 'Falta um acompanhamento', 'Vai querer acompanhar com algo?', 'Escolha seu acompanhamento', 'Bora completar o pedido?'],
+    acompanhamentos: ['Que tal um acompanhamento?', 'Falta um acompanhamento', 'Vai querer acompanhar com algo?', 'Escolha seu acompanhamento', 'Bora completar o pedido?'],
+    cobertura: ['Escolha sua cobertura', 'Que tal uma cobertura?', 'Bora escolher a cobertura?', 'Vai de qual cobertura?', 'Capricha na cobertura?'],
+    coberturas: ['Escolha sua cobertura', 'Que tal uma cobertura?', 'Bora escolher a cobertura?', 'Vai de qual cobertura?', 'Capricha na cobertura?'],
+    recheio: ['Qual recheio hoje?', 'Escolha o recheio', 'Bora escolher o recheio?', 'Vai de qual recheio?', 'Que tal um recheio especial?'],
+    recheios: ['Qual recheio hoje?', 'Escolha o recheio', 'Bora escolher o recheio?', 'Vai de qual recheio?', 'Que tal um recheio especial?'],
+    proteina: ['Quer reforçar a proteína?', 'Bora turbinar a proteína?', 'Mais proteína, por favor?', 'Dá um up na proteína?', 'Capricha na proteína?'],
+    proteinas: ['Quer reforçar a proteína?', 'Bora turbinar a proteína?', 'Mais proteína, por favor?', 'Dá um up na proteína?', 'Capricha na proteína?'],
+    doce: ['Um docinho pra fechar?', 'Que tal uma sobremesa?', 'Bora fechar com um doce?', 'Falta um docinho', 'Vai de sobremesa?'],
+    doces: ['Um docinho pra fechar?', 'Que tal uma sobremesa?', 'Bora fechar com um doce?', 'Falta um docinho', 'Vai de sobremesa?'],
+    sobremesa: ['Um docinho pra fechar?', 'Que tal uma sobremesa?', 'Bora fechar com um doce?', 'Falta um docinho', 'Vai de sobremesa?'],
+    sobremesas: ['Um docinho pra fechar?', 'Que tal uma sobremesa?', 'Bora fechar com um doce?', 'Falta um docinho', 'Vai de sobremesa?'],
+  };
+
+  // Frases genéricas variadas (fallback p/ categorias sem match) — 5 templates,
+  // sorteia um por categoria a cada abertura da tela
+  const FRASES_GENERICAS = [
+    (cat) => `Que tal um ${cat.toLowerCase()}?`,
+    (cat) => `Bora incrementar com ${cat.toLowerCase()}?`,
+    (cat) => `Dá um up com ${cat.toLowerCase()}`,
+    (cat) => `Escolha seu ${cat.toLowerCase()}`,
+    (cat) => `Vai de ${cat.toLowerCase()}?`,
+  ];
+
+  // Sorteia, uma vez por montagem da tela (a cada abertura), qual das 5 frases
+  // usar para cada categoria de adicional. Assim, toda vez que o usuário abre
+  // o produto de novo, pode aparecer uma frase diferente (rodízio).
+  const fraseIndices = useMemo(() => {
+    const map = {};
+    categoriasAdicionais.forEach(({ categoria }) => {
+      map[categoria] = Math.floor(Math.random() * 5);
+    });
+    return map;
+  }, [categoriasAdicionais]);
+
+  const gerarFraseCategoria = (categoria) => {
+    const chave = categoria.trim().toLowerCase();
+    const idx = fraseIndices[categoria] ?? 0;
+    if (FRASES_CATEGORIA[chave]) return FRASES_CATEGORIA[chave][idx];
+    return FRASES_GENERICAS[idx](categoria);
+  };
+
+  // Mesmo rodízio de frases (sorteia 1 de 5 a cada abertura da tela), mas
+  // separado do de adicionais já que bebidas vem de outra fonte de dados.
+  const fraseBebidaIndex = useMemo(() => Math.floor(Math.random() * 5), []);
+  const fraseBebida = FRASES_CATEGORIA.bebidas[fraseBebidaIndex];
+
+  // Produto sendo visto já é uma bebida? Nesse caso não mostra a seção
+  // (senão a Coca-Cola apareceria dentro da própria tela da Coca-Cola).
+  const isBebida = produto?.categoria?.trim().toLowerCase().startsWith('bebida');
 
   const calcularPrecoTotal = () => {
     if (!produto) return 0;
@@ -136,8 +280,13 @@ export default function ProdutoDetail() {
   const formatPreco = (valor) =>
     valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  const handleAdicionarAoCarrinho = () => {
-    if (!produto) return;
+  // Monta a lista de itens que iriam pro carrinho (produto principal +
+  // bebidas avulsas), sem efeito colateral nenhum. Extraído do handler de
+  // clique pra poder ser reaproveitado tanto no fluxo normal (usuário já
+  // logado) quanto guardado como intenção pendente (usuário deslogado —
+  // ver utils/pendingCartIntent.js), sem duplicar a lógica de preço.
+  const buildCartItems = () => {
+    if (!produto) return [];
 
     // Expande adicionais com quantidade > 0, repetindo o item conforme qty
     const adicionaisList = adicionais
@@ -148,19 +297,96 @@ export default function ProdutoDetail() {
 
     const precoTotalItem = produto.preco + totalAdicionais;
 
-    addToCart({
-      id: produto.id,
-      nome: produto.nome,
-      preco: `R$ ${precoTotalItem.toFixed(2).replace('.', ',')}`,
-      precoNum: precoTotalItem * 100,
-      imagem: produto.imagem,
-      quantidade,
-      adicionais: adicionaisList,
-      observacoes,
-    });
+    const items = [
+      {
+        id: produto.id,
+        nome: produto.nome,
+        preco: `R$ ${precoTotalItem.toFixed(2).replace('.', ',')}`,
+        precoNum: precoTotalItem * 100,
+        imagem: produto.imagem,
+        quantidade,
+        adicionais: adicionaisList,
+        observacoes,
+      },
+    ];
 
+    // Bebidas entram no carrinho como itens independentes (não como
+    // adicional deste produto), mas só agora — no clique de "Adicionar" —
+    // e não mais assim que a pessoa toca no "+". Se ela sair da tela sem
+    // confirmar, as bebidas escolhidas somem junto.
+    bebidas
+      .filter((b) => (bebidasSelecionadas[b.id] || 0) > 0)
+      .forEach((bebida) => {
+        const qty = bebidasSelecionadas[bebida.id];
+        items.push({
+          id: bebida.id,
+          nome: bebida.name,
+          preco: `R$ ${bebida.price.toFixed(2).replace('.', ',')}`,
+          precoNum: bebida.price * 100,
+          imagem: bebida.image_url,
+          quantidade: qty,
+          adicionais: [],
+          observacoes: '',
+        });
+      });
+
+    return items;
+  };
+
+  const handleAdicionarAoCarrinho = async () => {
+    if (!produto) return;
+
+    // Gate de login: sem sessão efetiva, não adiciona nada agora. Guarda a
+    // intenção (o que seria adicionado) em memória e pede pra abrir o
+    // AuthBottomSheet global — que já está montado em _layout.js e aparece
+    // por cima desta própria tela, sem navegar pra lugar nenhum. Se a
+    // pessoa completar o login (por qualquer canal), o _layout.js consome
+    // essa intenção sozinho assim que resolver o usuário como logado (ver
+    // utils/pendingCartIntent.js). Se ela sair sem logar, a intenção só
+    // fica parada aí — não vira item nenhum.
+    const session = await getEffectiveSession();
+    if (!session) {
+      setPendingCartIntent(buildCartItems());
+      requestAuthSheet();
+      return;
+    }
+
+    buildCartItems().forEach(addToCart);
     router.back();
   };
+
+  // Fix do bug em que a status bar translúcida "esquece" a configuração e
+  // fica preta/opaca depois de um tempo (comum no Android quando o app
+  // volta do background ou quando outra tela mexe na StatusBar). Reaplica
+  // o estilo sempre que a tela ganha foco e sempre que o app volta ao
+  // primeiro plano.
+  useFocusEffect(
+    useCallback(() => {
+      const applyStatusBar = () => {
+        StatusBar.setBarStyle('light-content', true);
+        StatusBar.setTranslucent(true);
+        StatusBar.setBackgroundColor('transparent', true);
+      };
+
+      applyStatusBar();
+
+      // Enquanto a tela de produto está em foco, o botão flutuante "ver
+      // carrinho" fica escondido (senão fica feio descendo por cima do
+      // footer fixo daqui). Volta a aparecer normalmente ao sair da tela.
+      setHideFloating(true);
+
+      const subscription = AppState.addEventListener('change', (nextState) => {
+        if (nextState === 'active') {
+          applyStatusBar();
+        }
+      });
+
+      return () => {
+        subscription.remove();
+        setHideFloating(false);
+      };
+    }, [])
+  );
 
   if (loading) {
     return (
@@ -197,23 +423,24 @@ export default function ProdutoDetail() {
             resizeMode="cover"
             onError={() => setUseFallback(true)}
           />
-          <View style={s.overlay} />
 
-          {/* Botao fechar */}
+          {/* Botao voltar */}
           <TouchableOpacity style={s.closeBtn} onPress={() => router.back()} activeOpacity={0.8}>
-            <Ionicons name="close" size={20} color="#333" />
+            <Ionicons name="chevron-back" size={24} color="#FFB800" />
           </TouchableOpacity>
-
-          {/* Nome sobre a imagem */}
-          <Text style={s.titulo}>{produto.nome}</Text>
         </View>
 
         {/* Conteudo */}
         <View style={s.content}>
 
-          {/* Descricao e preco */}
+          {/* Nome e preco lado a lado, embaixo da foto */}
+          <View style={s.nomePrecoRow}>
+            <Text style={s.titulo}>{produto.nome}</Text>
+            <Text style={s.precoPrincipal}>{produto.precoFormatado}</Text>
+          </View>
+
+          {/* Descricao */}
           <Text style={s.descricao}>{produto.descricao}</Text>
-          <Text style={s.precoPrincipal}>{produto.precoFormatado}</Text>
 
           {/* Adicionais */}
           <View style={s.sectionHeader}>
@@ -226,40 +453,109 @@ export default function ProdutoDetail() {
           {adicionais.length === 0 ? (
             <Text style={s.semAdicionais}>Nenhum adicional disponível</Text>
           ) : (
-            adicionais.map((item) => {
-              const qty = adicionaisSelecionados[item.id] || 0;
-              return (
-                <View key={item.id} style={s.adicionalItem}>
-                  <View style={s.adicionalInfo}>
-                    <Text style={s.adicionalNome}>{item.name}</Text>
-                    <Text style={s.adicionalPreco}>
-                      + R$ {item.price.toFixed(2).replace('.', ',')}
-                    </Text>
-                  </View>
-                  <View style={s.adicionalQtyContainer}>
-                    {qty > 0 && (
-                      <TouchableOpacity
-                        style={s.qtyAdicionalBtn}
-                        onPress={() => decrementAdicional(item.id)}
-                        activeOpacity={0.8}
-                      >
-                        <Ionicons name="remove" size={16} color="#333" />
-                      </TouchableOpacity>
-                    )}
-                    {qty > 0 && (
-                      <Text style={s.qtyAdicionalText}>{qty}</Text>
-                    )}
-                    <TouchableOpacity
-                      style={[s.addBtn, qty > 0 && s.addBtnSelected]}
-                      onPress={() => incrementAdicional(item.id)}
-                      activeOpacity={0.8}
-                    >
-                      <Ionicons name="add" size={18} color={qty > 0 ? '#fff' : '#333'} />
-                    </TouchableOpacity>
-                  </View>
+            categoriasAdicionais.map(({ categoria, itens }) => (
+              <View key={categoria} style={s.categoriaGroup}>
+                <View style={s.categoriaHeaderBg}>
+                  <Text style={s.categoriaTitle}>{gerarFraseCategoria(categoria)}</Text>
+                  <Text style={s.categoriaSubtitle}>Escolha até 10 opções</Text>
                 </View>
-              );
-            })
+                {itens.map((item, index) => {
+                  const qty = adicionaisSelecionados[item.id] || 0;
+                  const isLast = index === itens.length - 1;
+                  return (
+                    <View
+                      key={item.id}
+                      style={[s.adicionalItem, !isLast && s.adicionalItemDivider]}
+                    >
+                      <View style={s.adicionalInfo}>
+                        <Text style={s.adicionalNome}>{item.name}</Text>
+                        <Text style={s.adicionalPreco}>
+                          + R$ {item.price.toFixed(2).replace('.', ',')}
+                        </Text>
+                      </View>
+                      <View style={[s.adicionalQtyContainer, qty > 0 && s.adicionalQtyContainerAtivo]}>
+                        {qty > 0 && (
+                          <TouchableOpacity
+                            style={s.qtyAdicionalBtn}
+                            onPress={() => decrementAdicional(item.id)}
+                            activeOpacity={0.8}
+                          >
+                            <Ionicons name="remove" size={16} color="#333" />
+                          </TouchableOpacity>
+                        )}
+                        {qty > 0 && (
+                          <Text style={s.qtyAdicionalText}>{qty}</Text>
+                        )}
+                        <TouchableOpacity
+                          style={s.addBtn}
+                          onPress={() => incrementAdicional(item.id)}
+                          activeOpacity={0.8}
+                        >
+                          <Ionicons name="add" size={20} color="#FFB800" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            ))
+          )}
+
+          {/* Bebidas — mesma vitrine visual das categorias de adicionais,
+              mas cada item aqui é um produto próprio (products.category
+              começando com "bebida") e vira item separado no carrinho. */}
+          {!isBebida && bebidas.length > 0 && (
+            <View style={s.categoriaGroup}>
+              <View style={s.categoriaHeaderBg}>
+                <Text style={s.categoriaTitle}>{fraseBebida}</Text>
+                <Text style={s.categoriaSubtitle}>Escolha até 10 opções</Text>
+              </View>
+              {bebidas.map((bebida, index) => {
+                const qty = bebidasSelecionadas[bebida.id] || 0;
+                const isLast = index === bebidas.length - 1;
+                return (
+                  <View
+                    key={bebida.id}
+                    style={[s.adicionalItem, !isLast && s.adicionalItemDivider]}
+                  >
+                    <View style={s.adicionalInfo}>
+                      <Text style={s.adicionalNome}>{bebida.name}</Text>
+                      <Text style={s.adicionalPreco}>
+                        + R$ {bebida.price.toFixed(2).replace('.', ',')}
+                      </Text>
+                    </View>
+                    <View style={s.bebidaRight}>
+                      <Image
+                        source={resolveImage(bebida.image_url, bebida.category)}
+                        style={s.bebidaImagem}
+                        resizeMode="contain"
+                      />
+                      <View style={[s.adicionalQtyContainer, qty > 0 && s.adicionalQtyContainerAtivo]}>
+                        {qty > 0 && (
+                          <TouchableOpacity
+                            style={s.qtyAdicionalBtn}
+                            onPress={() => decrementBebida(bebida.id)}
+                            activeOpacity={0.8}
+                          >
+                            <Ionicons name="remove" size={16} color="#333" />
+                          </TouchableOpacity>
+                        )}
+                        {qty > 0 && (
+                          <Text style={s.qtyAdicionalText}>{qty}</Text>
+                        )}
+                        <TouchableOpacity
+                          style={s.addBtn}
+                          onPress={() => incrementBebida(bebida.id)}
+                          activeOpacity={0.8}
+                        >
+                          <Ionicons name="add" size={20} color="#FFB800" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
           )}
 
           {/* Observacoes */}
@@ -278,7 +574,7 @@ export default function ProdutoDetail() {
       </ScrollView>
 
       {/* Footer fixo */}
-      <View style={s.footer}>
+      <Animated.View style={[s.footer, footerAnimatedStyle]}>
         <View style={s.quantidadeContainer}>
           <TouchableOpacity
             style={s.qtyBtn}
@@ -302,7 +598,7 @@ export default function ProdutoDetail() {
           <Text style={s.botaoAdicionarText}>Adicionar</Text>
           <Text style={s.botaoAdicionarPreco}>{formatPreco(calcularPrecoTotal())}</Text>
         </TouchableOpacity>
-      </View>
+      </Animated.View>
     </View>
   );
 }
@@ -316,13 +612,15 @@ const s = StyleSheet.create({
   btnVoltarText: { color: '#333', fontWeight: 'bold', fontSize: 15 },
 
   // Imagem
-  imageContainer: { width, height: 260, position: 'relative' },
-  image: { width: '100%', height: '100%' },
-  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.32)' },
+  // Container com altura fixa e overflow escondido; a imagem é renderizada
+  // mais alta que o container e ancorada no topo (top: 0), então o corte
+  // acontece só embaixo — o produto fica mais visível na parte de cima.
+  imageContainer: { width, height: 400, position: 'relative', overflow: 'hidden' },
+  image: { position: 'absolute', top: 0, left: 0, width: '100%', height: 460 },
   closeBtn: {
     position: 'absolute',
-    top: 48,
-    right: 18,
+    top: 64,
+    left: 18,
     backgroundColor: '#fff',
     borderRadius: 99,
     width: 36,
@@ -331,29 +629,30 @@ const s = StyleSheet.create({
     alignItems: 'center',
     ...SHADOWS.md,
   },
-  titulo: {
-    position: 'absolute',
-    bottom: 48,
-    left: 24,
-    right: 60,
-    color: '#fff',
-    fontSize: 26,
-    fontWeight: '900',
-    textShadowColor: 'rgba(0,0,0,0.5)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
-  },
 
   // Conteudo
   content: {
     backgroundColor: '#fff',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
-    marginTop: -28,
+    marginTop: -8,
     padding: 24,
   },
+  nomePrecoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+    gap: 12,
+  },
+  titulo: {
+    flex: 1,
+    color: COLORS.text,
+    fontSize: 22,
+    fontWeight: '900',
+  },
   descricao: { color: COLORS.textSecondary, fontSize: 14, lineHeight: 21, marginBottom: 12 },
-  precoPrincipal: { color: '#FFB800', fontSize: 22, fontWeight: '800', marginBottom: 24 },
+  precoPrincipal: { color: '#FFB800', fontSize: 20, fontWeight: '800' },
 
   // Secoes
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
@@ -362,31 +661,60 @@ const s = StyleSheet.create({
   opcionalText: { fontSize: 10, color: COLORS.textMuted, fontWeight: '700', letterSpacing: 0.5 },
   semAdicionais: { color: COLORS.textMuted, fontSize: 14, marginBottom: 16 },
 
-  // Adicionais
+  // Categorias de adicionais
+  categoriaGroup: { marginBottom: 4 },
+  categoriaHeaderBg: {
+    backgroundColor: '#F7F5F1',
+    marginHorizontal: -24,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    marginBottom: 4,
+  },
+  categoriaTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.text,
+    letterSpacing: 0.2,
+  },
+  categoriaSubtitle: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
+
+  // Adicionais (soltos, sem card, separados por linha)
   adicionalItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 14,
-    paddingHorizontal: 16,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#f0f0f0',
-    ...SHADOWS.sm,
+  },
+  adicionalItemDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
   },
   adicionalInfo: { flex: 1 },
   adicionalNome: { fontSize: 15, fontWeight: '600', color: COLORS.text },
   adicionalPreco: { fontSize: 13, color: '#FFB800', marginTop: 2 },
+  // Pílula flutuante "- 1 +": só aparece com fundo/sombra quando tem
+  // quantidade selecionada (qty > 0); com qty 0 fica só o botão "+" solto.
   adicionalQtyContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 2,
+    backgroundColor: '#fff',
+    borderRadius: 99,
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+  },
+  adicionalQtyContainerAtivo: {
+    backgroundColor: '#fff',
+    ...SHADOWS.md,
   },
   qtyAdicionalBtn: {
-    width: 30,
-    height: 30,
+    width: 28,
+    height: 28,
     borderRadius: 99,
     backgroundColor: '#f0f0f0',
     justifyContent: 'center',
@@ -400,14 +728,17 @@ const s = StyleSheet.create({
     textAlign: 'center',
   },
   addBtn: {
-    width: 32,
-    height: 32,
+    width: 28,
+    height: 28,
     borderRadius: 99,
-    backgroundColor: '#f0f0f0',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  addBtnSelected: { backgroundColor: '#FFB800' },
+
+  // Bebidas: foto do produto ao lado do botao "+", igual ao print de
+  // referencia (iFood-like).
+  bebidaRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  bebidaImagem: { width: 48, height: 48 },
 
   // Observacoes
   inputObs: {

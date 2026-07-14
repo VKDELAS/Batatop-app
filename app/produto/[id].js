@@ -18,6 +18,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../../supabaseConfig';
 import { useCart } from '../../utils/cartStore';
@@ -25,6 +26,9 @@ import { getEffectiveSession } from '../../utils/authSession';
 import { setPendingCartIntent } from '../../utils/pendingCartIntent';
 import { requestAuthSheet } from '../../utils/authSheetRequest';
 import { COLORS, SHADOWS, RADIUS } from '../../constants/theme';
+import useAddressVerification from '../hooks/useAddressVerification';
+import AddressVerificationModal from '../../components/AddressVerificationModal';
+import NoAddressModal from '../../components/NoAddressModal';
 
 const { width } = Dimensions.get('window');
 
@@ -51,6 +55,7 @@ export default function ProdutoDetail() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const { add: addToCart, setHideFloating } = useCart();
+  const insets = useSafeAreaInsets();
 
   const [produto, setProduto] = useState(null);
   const [adicionais, setAdicionais] = useState([]);
@@ -64,6 +69,16 @@ export default function ProdutoDetail() {
   // carrinho de fato quando a pessoa aperta "Adicionar" no rodapé.
   const [bebidasSelecionadas, setBebidasSelecionadas] = useState({});
   const [observacoes, setObservacoes] = useState('');
+
+  // Verificação de endereço (GPS vs endereço selecionado) — ver
+  // app/hooks/useAddressVerification.js
+  const { verifyAddress, confirmContinue } = useAddressVerification();
+  const [showNoAddress, setShowNoAddress] = useState(false);
+  const [showVerify, setShowVerify] = useState(false);
+  const [verifyAddressData, setVerifyAddressData] = useState(null);
+  // Trava contra clique duplo/repetido em "Adicionar" (evita rodar a
+  // verificação + montar o carrinho mais de uma vez em paralelo).
+  const [isAdding, setIsAdding] = useState(false);
 
   // Padrão da seção 10 do CLAUDE.md — footer acompanha o teclado via valor
   // nativo (imune a ciclos de background/foreground), nada de resize da
@@ -333,26 +348,96 @@ export default function ProdutoDetail() {
     return items;
   };
 
-  const handleAdicionarAoCarrinho = async () => {
-    if (!produto) return;
-
-    // Gate de login: sem sessão efetiva, não adiciona nada agora. Guarda a
-    // intenção (o que seria adicionado) em memória e pede pra abrir o
-    // AuthBottomSheet global — que já está montado em _layout.js e aparece
-    // por cima desta própria tela, sem navegar pra lugar nenhum. Se a
-    // pessoa completar o login (por qualquer canal), o _layout.js consome
-    // essa intenção sozinho assim que resolver o usuário como logado (ver
-    // utils/pendingCartIntent.js). Se ela sair sem logar, a intenção só
-    // fica parada aí — não vira item nenhum.
-    const session = await getEffectiveSession();
-    if (!session) {
-      setPendingCartIntent(buildCartItems());
-      requestAuthSheet();
-      return;
+  // router.back() pode não ter pra onde voltar (ex: Fast Refresh resetou a
+  // pilha, ou a tela foi aberta direto por deep link) — nesse caso cai pra
+  // home em vez de disparar o warning "GO_BACK not handled".
+  const voltarOuHome = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/');
     }
+  };
 
-    buildCartItems().forEach(addToCart);
-    router.back();
+  const handleAdicionarAoCarrinho = async () => {
+    if (!produto || isAdding) return;
+    setIsAdding(true);
+    try {
+      // Gate de endereço: verifica se o GPS atual bate com o endereço
+      // selecionado (raio de 30m — ver app/hooks/useAddressVerification.js).
+      // Roda antes do gate de login: sem sessão, o hook devolve
+      // 'no_session' e cai direto no fluxo de login já existente abaixo.
+      const addressCheck = await verifyAddress();
+
+      if (addressCheck.status === 'no_address') {
+        setShowNoAddress(true);
+        return;
+      }
+      if (addressCheck.status === 'needs_confirmation') {
+        setVerifyAddressData(addressCheck.address);
+        setShowVerify(true);
+        return;
+      }
+
+      // Gate de login: sem sessão efetiva, não adiciona nada agora. Guarda a
+      // intenção (o que seria adicionado) em memória e pede pra abrir o
+      // AuthBottomSheet global — que já está montado em _layout.js e aparece
+      // por cima desta própria tela, sem navegar pra lugar nenhum. Se a
+      // pessoa completar o login (por qualquer canal), o _layout.js consome
+      // essa intenção sozinho assim que resolver o usuário como logado (ver
+      // utils/pendingCartIntent.js). Se ela sair sem logar, a intenção só
+      // fica parada aí — não vira item nenhum.
+      const session = await getEffectiveSession();
+      if (!session) {
+        setPendingCartIntent(buildCartItems());
+        requestAuthSheet();
+        return;
+      }
+
+      buildCartItems().forEach(addToCart);
+      voltarOuHome();
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
+  // "Continuar assim" no modal de verificação de endereço — grava o GPS
+  // atual como verificado (não pergunta de novo nesse raio) e segue o
+  // fluxo normal de adicionar.
+  const handleContinuarMesmoEndereco = async () => {
+    setShowVerify(false);
+    await confirmContinue();
+    setIsAdding(true);
+    try {
+      const session = await getEffectiveSession();
+      if (!session) {
+        setPendingCartIntent(buildCartItems());
+        requestAuthSheet();
+        return;
+      }
+      buildCartItems().forEach(addToCart);
+      voltarOuHome();
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
+  // "Cadastrar endereço" (NoAddressModal) — pessoa sem nenhum endereço
+  // salvo. Pula a lista e vai direto pro MapSelector (ver ?autoMap=1 em
+  // app/addresses.js). Guarda o carrinho pendente — addresses.js consome
+  // sozinho assim que o endereço for salvo.
+  const handleCadastrarEndereco = () => {
+    setShowNoAddress(false);
+    setPendingCartIntent(buildCartItems());
+    router.push('/addresses?autoMap=1');
+  };
+
+  // "Trocar o endereço" (AddressVerificationModal) — já tem endereço(s)
+  // salvo(s), mostra a lista normal pra escolher/trocar.
+  const handleTrocarEndereco = () => {
+    setShowVerify(false);
+    setPendingCartIntent(buildCartItems());
+    router.push('/addresses');
   };
 
   // Fix do bug em que a status bar translúcida "esquece" a configuração e
@@ -413,7 +498,7 @@ export default function ProdutoDetail() {
     <View style={s.container}>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 + insets.bottom }}>
 
         {/* Imagem hero */}
         <View style={s.imageContainer}>
@@ -574,7 +659,7 @@ export default function ProdutoDetail() {
       </ScrollView>
 
       {/* Footer fixo */}
-      <Animated.View style={[s.footer, footerAnimatedStyle]}>
+      <Animated.View style={[s.footer, footerAnimatedStyle, { paddingBottom: insets.bottom }]}>
         <View style={s.quantidadeContainer}>
           <TouchableOpacity
             style={s.qtyBtn}
@@ -593,12 +678,33 @@ export default function ProdutoDetail() {
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity style={s.botaoAdicionar} onPress={handleAdicionarAoCarrinho} activeOpacity={0.85}>
-          <Ionicons name="cart-outline" size={20} color="#333" style={{ marginRight: 8 }} />
+        <TouchableOpacity
+          style={[s.botaoAdicionar, isAdding && s.botaoAdicionarDisabled]}
+          onPress={handleAdicionarAoCarrinho}
+          activeOpacity={0.85}
+          disabled={isAdding}
+        >
+          {isAdding ? (
+            <ActivityIndicator color="#333" style={{ marginRight: 8 }} />
+          ) : (
+            <Ionicons name="cart-outline" size={20} color="#333" style={{ marginRight: 8 }} />
+          )}
           <Text style={s.botaoAdicionarText}>Adicionar</Text>
           <Text style={s.botaoAdicionarPreco}>{formatPreco(calcularPrecoTotal())}</Text>
         </TouchableOpacity>
       </Animated.View>
+
+      <NoAddressModal
+        visible={showNoAddress}
+        onClose={() => setShowNoAddress(false)}
+        onCadastrar={handleCadastrarEndereco}
+      />
+      <AddressVerificationModal
+        visible={showVerify}
+        address={verifyAddressData}
+        onTrocar={handleTrocarEndereco}
+        onContinuar={handleContinuarMesmoEndereco}
+      />
     </View>
   );
 }
@@ -787,6 +893,7 @@ const s = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 18,
   },
+  botaoAdicionarDisabled: { opacity: 0.7 },
   botaoAdicionarText: { color: '#333', fontWeight: '700', fontSize: 15, flex: 1 },
   botaoAdicionarPreco: { color: '#333', fontWeight: '700', fontSize: 15 },
 });

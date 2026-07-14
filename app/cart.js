@@ -2,6 +2,7 @@ import { View, Text, ScrollView, StyleSheet, Pressable, Image, ActivityIndicator
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useState, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCart } from '../utils/cartStore';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { supabase } from '../supabaseConfig';
@@ -67,6 +68,7 @@ export default function Cart() {
   const { items, remove, updateQty, clear } = useCart();
   const [processing, setProcessing] = useState(false);
   const [authModalVisible, setAuthModalVisible] = useState(false);
+  const insets = useSafeAreaInsets();
 
   const { onScroll, resetHeader } = useScrollHandler();
   const headerHeight = useHeaderHeight();
@@ -115,7 +117,7 @@ export default function Cart() {
       <ScrollView 
         style={s.scroll} 
         showsVerticalScrollIndicator={false} 
-        contentContainerStyle={{ padding: SPACING[4], paddingTop: headerHeight + 16, paddingBottom: 140 }}
+        contentContainerStyle={{ padding: SPACING[4], paddingTop: headerHeight + 16, paddingBottom: insets.bottom + 120 }}
         onScroll={onScroll}
         scrollEventThrottle={16}
       >
@@ -157,7 +159,7 @@ export default function Cart() {
       </ScrollView>
 
       {/* Footer fixo */}
-      <View style={s.footer}>
+      <View style={[s.footer, { paddingBottom: insets.bottom + 16 }]}>
         <Pressable 
           style={[s.checkoutBtn, processing && s.checkoutBtnDisabled]} 
           onPress={handleCheckout}
@@ -417,7 +419,6 @@ const s = StyleSheet.create({
     right: 0,
     backgroundColor: '#FFFFFF',
     padding: 16,
-    paddingBottom: 34,
     borderTopWidth: 1,
     borderTopColor: '#ECE6DC',
     shadowColor: '#000',

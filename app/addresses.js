@@ -10,10 +10,10 @@ import {
   FlatList, TouchableOpacity, BackHandler, Modal,
   StatusBar, Image, AppState,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavContext } from './_layout';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
@@ -21,6 +21,9 @@ import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme
 import { supabase } from '../supabaseConfig';
 import { getEffectiveSession, subscribeAuthUiChange } from '../utils/authSession';
 import { getPendingAddress, setPendingAddress, clearPendingAddress } from '../utils/pendingAddress';
+import { getPendingCartIntent, clearPendingCartIntent } from '../utils/pendingCartIntent';
+import { setSelectedAddressId } from '../utils/addressVerification';
+import { useCart } from '../utils/cartStore';
 import MapView from 'react-native-maps';
 import MapSelector from 'components/MapSelector';
 import AuthBottomSheet from 'components/AuthBottomSheet';
@@ -749,6 +752,12 @@ export default function Addresses() {
   const [menuAddress, setMenuAddress]       = useState(null);
 
   const router = useRouter();
+  const { add: addToCart } = useCart();
+  const { autoMap } = useLocalSearchParams();
+  // Garante que o auto-disparo do mapa (ver useEffect abaixo, perto de
+  // handleUseCurrentLocation) só roda uma vez por montagem da tela, mesmo
+  // que o componente re-renderize várias vezes com o mesmo param na URL.
+  const autoMapTriggered = useRef(false);
   const insets = useSafeAreaInsets();
   const { lastRoute, setAnimation } = useNavContext();
   const { permissionGranted, checkPermission, requestPermission, getLocation, error: geoError } =
@@ -843,6 +852,19 @@ export default function Addresses() {
       setRequestingGeo(false);
     }
   };
+
+  // Veio do produto/[id].js sem ter nenhum endereço salvo (NoAddressModal
+  // → "Cadastrar endereço") — pula a tela de lista/busca e já abre o
+  // MapSelector centrado no GPS, igual o botão "usar localização atual"
+  // faria manualmente. Se a permissão for negada, handleUseCurrentLocation
+  // já mostra o alerta e fica na lista normalmente — não quebra nada.
+  useEffect(() => {
+    if (autoMap && !autoMapTriggered.current) {
+      autoMapTriggered.current = true;
+      handleUseCurrentLocation();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoMap]);
 
   const handleOpenSearch = () => setScreen('search');
 
@@ -1014,12 +1036,26 @@ export default function Addresses() {
         return;
       }
 
-      const { error } = await supabase.from('addresses').insert({
+      const { data: inserted, error } = await supabase.from('addresses').insert({
         ...addressData, user_id: user.id, is_default: addresses.length === 0,
-      });
+      }).select().single();
       if (error) throw error;
       setFormInitialValues(null);
       await fetchAddresses();
+
+      // Endereço recém-criado vira o selecionado — próxima verificação de
+      // GPS já usa ele (ver utils/addressVerification.js).
+      if (inserted?.id) await setSelectedAddressId(inserted.id);
+
+      // Se a pessoa veio parar aqui via NoAddressModal (tentou adicionar
+      // um produto sem ter endereço), o carrinho tava esperando salvo —
+      // consome agora e já leva o item junto pra home.
+      const pendingCart = await getPendingCartIntent();
+      if (pendingCart?.length) {
+        pendingCart.forEach(addToCart);
+        await clearPendingCartIntent();
+      }
+
       if (cameFromDetails) { router.push('/'); } else { setScreen('list'); }
     } catch { showThemedAlert('Erro', 'Não foi possível salvar o endereço.'); }
     finally  { setSaving(false); }

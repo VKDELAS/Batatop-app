@@ -113,7 +113,7 @@ export default function EntrarBanner({ appName = 'Batata Top', onPress, tabBarHe
 
     wasShowing.current = shouldShow;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname, isLoggedIn]);
+  }, [pathname, isLoggedIn, resolved]);
 
   const rStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: translateY.value }],
@@ -121,7 +121,7 @@ export default function EntrarBanner({ appName = 'Batata Top', onPress, tabBarHe
 
   return (
     <Animated.View
-      style={[styles.wrap, { bottom: tabBarHeight + 8 }, rStyle]}
+      style={[styles.wrap, { bottom: shouldShow ? tabBarHeight + 24 : -200 }, rStyle]}
       pointerEvents={shouldShow ? 'auto' : 'none'}
     >
       <Pressable style={styles.card} onPress={onPress}>

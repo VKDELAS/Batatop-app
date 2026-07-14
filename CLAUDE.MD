@@ -12,7 +12,6 @@
 - Não resuma nem repita o conteúdo deste CLAUDE.md na resposta. Confirme com uma linha curta (ex: "Li o contexto, pode mandar") e aplique as regras em silêncio.
 
 **Código:**
-- Ao editar um arquivo existente, mande só o trecho alterado (função/bloco + 2-3 linhas de contexto antes/depois), nunca o arquivo inteiro re-colado — a menos que eu peça explicitamente "manda o arquivo completo".
 - Não regere ou re-printe arquivos que não foram tocados só pra "dar contexto".
 - Não recrie do zero um componente/hook que já existe — edite o que já tem.
 

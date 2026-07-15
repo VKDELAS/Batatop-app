@@ -569,6 +569,7 @@ function Header({ onHeightChange, onRegisterReset }) {
   const isAddressPage = pathname.includes('addresses');
   const isCheckoutPage = pathname.includes('checkout');
   const isWelcomePage = pathname.includes('welcome');
+  const isLocationPage = pathname.includes('location');
 
   useEffect(() => {
     if (!authResolved) return;
@@ -587,7 +588,7 @@ function Header({ onHeightChange, onRegisterReset }) {
     }
   }, [isAddressPage, user, authResolved]);
 
-  if (isAuthPage || isProdutoPage || isCheckoutPage || isAddressPage || isWelcomePage) return null;
+  if (isAuthPage || isProdutoPage || isCheckoutPage || isAddressPage || isWelcomePage || isLocationPage) return null;
 
   return (
     <>
@@ -679,7 +680,8 @@ function CartBar() {
 
   const isCartPage = pathname.includes('cart') || pathname.includes('checkout');
   const isWelcomePage = pathname.includes('welcome');
-  const shouldShow = totalItems > 0 && !isCartPage && !isWelcomePage && !hideFloating;
+  const isLocationPage = pathname.includes('location');
+  const shouldShow = totalItems > 0 && !isCartPage && !isWelcomePage && !isLocationPage && !hideFloating;
 
   useEffect(() => {
     if (shouldShow && !wasVisible.current) {
@@ -743,7 +745,7 @@ function BottomTabBar({ onHeightChange }) {
   // Mesma regra que o Header já usa (isAuthPage) — a tab bar não deve
   // aparecer em cima da tela de login/cadastro, endereços (tela cheia,
   // estilo iFood) nem da tela de welcome/onboarding.
-  if (pathname.includes('produto') || pathname.includes('auth') || pathname.includes('addresses') || pathname.includes('welcome')) return null;
+  if (pathname.includes('produto') || pathname.includes('auth') || pathname.includes('addresses') || pathname.includes('welcome') || pathname.includes('location')) return null;
 
   const tabs = [
     { name: 'index',    label: 'Início',   icon: 'home',       iconOutline: 'home-outline' },
@@ -879,7 +881,7 @@ export default function RootLayout() {
             </View>
             <CartBar />
             <BottomTabBar onHeightChange={setTabBarHeight} />
-            {!pathname.includes('welcome') && (
+            {!pathname.includes('welcome') && !pathname.includes('location') && (
               <EntrarBanner onPress={() => setAuthSheetVisible(true)} tabBarHeight={tabBarHeight} />
             )}
             <AuthBottomSheet visible={authSheetVisible} onClose={() => setAuthSheetVisible(false)} />

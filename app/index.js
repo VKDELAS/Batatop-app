@@ -22,6 +22,8 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { ALREADY_SEEN_WELCOME_KEY } from './welcome';
+import { ALREADY_SEEN_LOCATION_KEY } from './location';
+import * as Location from 'expo-location';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { useProductRanking } from './hooks/useProductRanking';
 import BannerCarousel from '../components/BannerCarousel';
@@ -323,12 +325,16 @@ export default function Home() {
   const scrollRef = useRef(null);
   const [categoriasBottomY, setCategoriasBottomY] = useState(null);
 
-  // ── Onboarding: mostra /welcome só na primeira vez ──────────────────────
-  // Ver app/welcome.js (ALREADY_SEEN_WELCOME_KEY). null = ainda checando.
-  // Se a permissão de notificação já tá concedida, nem olha a flag — pula
-  // direto. Fica ANTES de qualquer outro hook/lógica da Home de propósito,
-  // pra sair rápido via <Redirect> sem montar o resto da tela à toa.
+  // ── Onboarding: mostra /welcome e depois /location, cada um só na
+  // primeira vez ──────────────────────────────────────────────────────────
+  // Ver app/welcome.js (ALREADY_SEEN_WELCOME_KEY) e app/location.js
+  // (ALREADY_SEEN_LOCATION_KEY). null = ainda checando essa etapa.
+  // Ordem de prioridade em CADA etapa: permissão já concedida > flag do
+  // AsyncStorage. Fica ANTES de qualquer outro hook/lógica da Home de
+  // propósito, pra sair rápido via <Redirect> sem montar o resto da tela à
+  // toa.
   const [needsWelcome, setNeedsWelcome] = useState(null);
+  const [needsLocation, setNeedsLocation] = useState(null);
 
   // TESTE: deixa `true` pra forçar a tela de welcome aparecer sempre,
   // ignorando permissão de notificação e AsyncStorage. VOLTAR PRA `false`
@@ -342,13 +348,30 @@ export default function Home() {
     }
 
     (async () => {
-      const { status } = await Notifications.getPermissionsAsync();
-      if (status === 'granted') {
-        setNeedsWelcome(false);
+      // 1) Etapa /welcome (notificações) — mesma regra de sempre.
+      const { status: notifStatus } = await Notifications.getPermissionsAsync();
+      let welcomeNeeded;
+      if (notifStatus === 'granted') {
+        welcomeNeeded = false;
+      } else {
+        const seenWelcome = await AsyncStorage.getItem(ALREADY_SEEN_WELCOME_KEY);
+        welcomeNeeded = seenWelcome !== 'true';
+      }
+      setNeedsWelcome(welcomeNeeded);
+
+      // Se ainda falta mostrar /welcome, /location fica pra depois — o
+      // usuário volta pro index.js (Home) ao concluir o /welcome, e essa
+      // checagem roda de novo nesse próximo mount.
+      if (welcomeNeeded) return;
+
+      // 2) Etapa /location — só chega aqui se /welcome já foi visto.
+      const { status: locStatus } = await Location.getForegroundPermissionsAsync();
+      if (locStatus === 'granted') {
+        setNeedsLocation(false);
         return;
       }
-      const seen = await AsyncStorage.getItem(ALREADY_SEEN_WELCOME_KEY);
-      setNeedsWelcome(seen !== 'true');
+      const seenLocation = await AsyncStorage.getItem(ALREADY_SEEN_LOCATION_KEY);
+      setNeedsLocation(seenLocation !== 'true');
     })();
   }, []);
 
@@ -434,11 +457,18 @@ export default function Home() {
 
   // Precisa vir DEPOIS de todos os hooks (regra do React) e ANTES do JSX
   // pesado da Home — assim não desenha nada da Home à toa se for redirecionar.
+  // Ordem: /welcome primeiro, /location depois, só então a Home de verdade.
   if (needsWelcome === null) {
     return <View style={{ flex: 1, backgroundColor: COLORS.background }} />;
   }
   if (needsWelcome) {
     return <Redirect href="/welcome" />;
+  }
+  if (needsLocation === null) {
+    return <View style={{ flex: 1, backgroundColor: COLORS.background }} />;
+  }
+  if (needsLocation) {
+    return <Redirect href="/location" />;
   }
 
   return (

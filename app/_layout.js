@@ -568,6 +568,7 @@ function Header({ onHeightChange, onRegisterReset }) {
   const isProdutoPage = pathname.includes('produto');
   const isAddressPage = pathname.includes('addresses');
   const isCheckoutPage = pathname.includes('checkout');
+  const isWelcomePage = pathname.includes('welcome');
 
   useEffect(() => {
     if (!authResolved) return;
@@ -586,7 +587,7 @@ function Header({ onHeightChange, onRegisterReset }) {
     }
   }, [isAddressPage, user, authResolved]);
 
-  if (isAuthPage || isProdutoPage || isCheckoutPage || isAddressPage) return null;
+  if (isAuthPage || isProdutoPage || isCheckoutPage || isAddressPage || isWelcomePage) return null;
 
   return (
     <>
@@ -677,7 +678,8 @@ function CartBar() {
   const wasVisible = useRef(false);
 
   const isCartPage = pathname.includes('cart') || pathname.includes('checkout');
-  const shouldShow = totalItems > 0 && !isCartPage && !hideFloating;
+  const isWelcomePage = pathname.includes('welcome');
+  const shouldShow = totalItems > 0 && !isCartPage && !isWelcomePage && !hideFloating;
 
   useEffect(() => {
     if (shouldShow && !wasVisible.current) {
@@ -739,9 +741,9 @@ function BottomTabBar({ onHeightChange }) {
   const insets = useSafeAreaInsets();
 
   // Mesma regra que o Header já usa (isAuthPage) — a tab bar não deve
-  // aparecer em cima da tela de login/cadastro nem da tela de endereços
-  // (que agora ocupa a tela inteira, estilo iFood).
-  if (pathname.includes('produto') || pathname.includes('auth') || pathname.includes('addresses')) return null;
+  // aparecer em cima da tela de login/cadastro, endereços (tela cheia,
+  // estilo iFood) nem da tela de welcome/onboarding.
+  if (pathname.includes('produto') || pathname.includes('auth') || pathname.includes('addresses') || pathname.includes('welcome')) return null;
 
   const tabs = [
     { name: 'index',    label: 'Início',   icon: 'home',       iconOutline: 'home-outline' },
@@ -800,6 +802,8 @@ const rootHeaderSpacerAnim = new Animated.Value(0);
 const rootHeaderAnimCtxValue = { headerAnim: rootHeaderAnim, headerSpacerAnim: rootHeaderSpacerAnim };
 
 export default function RootLayout() {
+  const router = useRouter();
+  const pathname = usePathname();
   const [headerHeight, setHeaderHeight] = useState(175);
   const [tabBarHeight, setTabBarHeight] = useState(70);
   const [animation, setAnimation]       = useState('slide_from_right');
@@ -875,7 +879,9 @@ export default function RootLayout() {
             </View>
             <CartBar />
             <BottomTabBar onHeightChange={setTabBarHeight} />
-            <EntrarBanner onPress={() => setAuthSheetVisible(true)} tabBarHeight={tabBarHeight} />
+            {!pathname.includes('welcome') && (
+              <EntrarBanner onPress={() => setAuthSheetVisible(true)} tabBarHeight={tabBarHeight} />
+            )}
             <AuthBottomSheet visible={authSheetVisible} onClose={() => setAuthSheetVisible(false)} />
           </View>
         </>

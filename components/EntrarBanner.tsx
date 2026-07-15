@@ -28,8 +28,6 @@ type EntrarBannerProps = {
 // Ajuste aqui se as rotas do seu projeto tiverem outros nomes.
 function isQualifyingRoute(pathname: string) {
   if (pathname === '/' || pathname === '/index') return true;
-  if (pathname.includes('cardapio')) return true;
-  if (pathname.includes('produto')) return true;
   return false;
 }
 

@@ -14,11 +14,14 @@ import {
   Clipboard,
   Dimensions,
 } from 'react-native';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, Redirect } from 'expo-router';
 import { Image as ExpoImage } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState, useRef, useCallback, useEffect, memo } from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
+import { ALREADY_SEEN_WELCOME_KEY } from './welcome';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme';
 import { useProductRanking } from './hooks/useProductRanking';
 import BannerCarousel from '../components/BannerCarousel';
@@ -320,6 +323,35 @@ export default function Home() {
   const scrollRef = useRef(null);
   const [categoriasBottomY, setCategoriasBottomY] = useState(null);
 
+  // ── Onboarding: mostra /welcome só na primeira vez ──────────────────────
+  // Ver app/welcome.js (ALREADY_SEEN_WELCOME_KEY). null = ainda checando.
+  // Se a permissão de notificação já tá concedida, nem olha a flag — pula
+  // direto. Fica ANTES de qualquer outro hook/lógica da Home de propósito,
+  // pra sair rápido via <Redirect> sem montar o resto da tela à toa.
+  const [needsWelcome, setNeedsWelcome] = useState(null);
+
+  // TESTE: deixa `true` pra forçar a tela de welcome aparecer sempre,
+  // ignorando permissão de notificação e AsyncStorage. VOLTAR PRA `false`
+  // antes de buildar pra produção.
+  const FORCE_SHOW_WELCOME = false;
+
+  useEffect(() => {
+    if (FORCE_SHOW_WELCOME) {
+      setNeedsWelcome(true);
+      return;
+    }
+
+    (async () => {
+      const { status } = await Notifications.getPermissionsAsync();
+      if (status === 'granted') {
+        setNeedsWelcome(false);
+        return;
+      }
+      const seen = await AsyncStorage.getItem(ALREADY_SEEN_WELCOME_KEY);
+      setNeedsWelcome(seen !== 'true');
+    })();
+  }, []);
+
   // Espaço reservado pro header no topo do conteúdo — agora é FIXO (sempre
   // igual à altura real do header), não anima mais nem encolhe/cresce. O
   // header virou puro overlay, exatamente igual a barra de categorias: ele
@@ -399,6 +431,15 @@ export default function Home() {
       mensagem: 'Só na 1ª compra!',
     },
   ];
+
+  // Precisa vir DEPOIS de todos os hooks (regra do React) e ANTES do JSX
+  // pesado da Home — assim não desenha nada da Home à toa se for redirecionar.
+  if (needsWelcome === null) {
+    return <View style={{ flex: 1, backgroundColor: COLORS.background }} />;
+  }
+  if (needsWelcome) {
+    return <Redirect href="/welcome" />;
+  }
 
   return (
     <View style={s.container}>

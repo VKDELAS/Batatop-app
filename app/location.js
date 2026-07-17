@@ -71,7 +71,7 @@ export default function LocationScreen() {
           pronto na própria imagem, igual à page 1 */}
       <View style={styles.illustrationWrapper}>
         <Image
-          source={require('../assets/background-page2.png')}
+          source={require('../assets/backgraound-page2.png')}
           style={styles.illustration}
           resizeMode="contain"
         />
@@ -181,7 +181,7 @@ const styles = StyleSheet.create({
   },
   // "Permitir" — preenchido, mesma cor amarela padrão da page 1
   buttonFilled: {
-    flex: 1.5,
+    flex: 1,
     backgroundColor: COLORS.yellow,
     borderRadius: 10,
     paddingVertical: 20,

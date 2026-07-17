@@ -90,17 +90,16 @@ export default function EntrarBanner({ appName = 'Batata Top', onPress, tabBarHe
         stiffness: 140,
         mass: 0.9,
       });
-    } else if (!shouldShow && cameFromShowing) {
-      // Saída definitiva (indo pra tela não-qualificada, ex: checkout,
-      // OU o usuário acabou de logar)
+    } else if (!shouldShow) {
+      // Qualquer saida (tela nao-qualificada, login, etc): animacao elastica
       translateY.value = withSequence(
-        withTiming(18, { duration: 90, easing: Easing.out(Easing.quad) }),   // agacha
-        withTiming(-16, { duration: 110, easing: Easing.out(Easing.quad) }), // impulso pra cima
-        withTiming(180, { duration: 220, easing: Easing.in(Easing.cubic) }) // cai saindo da tela
+        withTiming(18, { duration: 90, easing: Easing.out(Easing.quad) }),
+        withTiming(-16, { duration: 110, easing: Easing.out(Easing.quad) }),
+        withTiming(180, { duration: 220, easing: Easing.in(Easing.cubic) })
       );
     } else if (shouldShow && cameFromShowing) {
-      // Navegou entre duas telas qualificadas (ex: Cardápio -> Item):
-      // roda o "pegar embalo" completo e já reentra com o bounce.
+      // Navegou entre duas telas qualificadas (ex: Cardapio -> Item):
+      // roda o "pegar embalo" completo e ja reentra com o bounce.
       translateY.value = withSequence(
         withTiming(18, { duration: 90, easing: Easing.out(Easing.quad) }),
         withTiming(-16, { duration: 110, easing: Easing.out(Easing.quad) }),

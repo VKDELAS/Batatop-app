@@ -14,7 +14,7 @@ export const CATEGORIAS = [
   { label: 'Batatas',         icon: require('../assets/icones3d/icone batata.png'),          cat: 'Batatas'  },
   { label: 'Macarrão',        icon: require('../assets/icones3d/icone macarrao.png'),         cat: 'Macarrão' },
   { label: 'Bebidas',         icon: require('../assets/icones3d/icone bebidas geladas.png'),  cat: 'Bebidas'  },
-  { label: 'Cupons',          icon: require('../assets/icones3d/icone cupom.png'),           disabled: true },
+  { label: 'Cupons',          icon: require('../assets/icones3d/icone cupom.png'),           route: '/cupons'},
   { label: 'Ver mais',        icon: require('../assets/icones3d/iconetodos.png'),            route: '/cardapio', iconOnly: true },
 ];
 

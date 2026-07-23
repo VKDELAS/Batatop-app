@@ -11,10 +11,22 @@ import { formatCardDisplay } from '../utils/usePaymentCards';
 import { SOFT_LOGOUT_KEY, emitAuthUiChange, getEffectiveSession } from '../utils/authSession';
 import PaymentMethodModal from '../components/PaymentMethodModal';
 import LogoutRememberModal from '../components/LogoutRememberModal';
+import AuthBottomSheet from '../components/AuthBottomSheet';
+import ProfileAccordionItem from '../components/ProfileAccordionItem';
+import ProfileSuccessToast from '../components/ProfileSuccessToast';
 import { isAdminUser, checkIsAdmin } from '../utils/isAdmin';
 
 // Precisa ser IGUAL à SAVED_USER_KEY de components/AuthBottomSheet.tsx
 const SAVED_USER_KEY = '@batatatop:savedUser';
+
+// Mesma máscara usada no cadastro (app/auth/login.js) — só pra exibição.
+const formatCpfDisplay = (digits) => {
+  if (!digits) return '';
+  return digits
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+};
 
 export default function Profile() {
   const router = useRouter();
@@ -30,6 +42,10 @@ export default function Profile() {
   const [selectedCardInfo, setSelectedCardInfo] = useState(null);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [logoutModalVisible, setLogoutModalVisible] = useState(false);
+  // Tela de perfil deslogado (soft logout) — sheet de auth e toast de
+  // "histórico limpo", só usados no bloco `if (!user)` abaixo.
+  const [authSheetVisible, setAuthSheetVisible] = useState(false);
+  const [historyToastVisible, setHistoryToastVisible] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -219,6 +235,23 @@ export default function Profile() {
     return map[method] || method;
   };
 
+  // Página que só faz sentido logado: se não tiver `user`, abre o
+  // AuthBottomSheet em vez de navegar. Usado por Notificações e Endereços
+  // no bloco `if (!user)` abaixo.
+  const requireAuth = (action) => {
+    if (user) {
+      action();
+    } else {
+      setAuthSheetVisible(true);
+    }
+  };
+
+  const handleClearHistory = () => {
+    // Limpar histórico local não precisa de login.
+    // TODO: limpar o histórico de busca de verdade aqui (AsyncStorage/estado)
+    setHistoryToastVisible(true);
+  };
+
   if (loading) {
     return (
       <View style={s.loadingContainer}>
@@ -229,43 +262,88 @@ export default function Profile() {
 
   if (!user) {
     return (
-      <View style={ag.wrap}>
-        <View style={ag.iconWrap}>
-          <View style={ag.iconCircle}>
-            <Ionicons name="person-outline" size={34} color="#FFB800" />
+      <View style={sg.container}>
+        <ProfileSuccessToast
+          visible={historyToastVisible}
+          message="Histórico limpo com sucesso"
+          onHide={() => setHistoryToastVisible(false)}
+        />
+
+        <ScrollView
+          contentContainerStyle={sg.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Header */}
+          <View style={sg.headerRow}>
+            <Text style={sg.headerText}>Falta pouco para matar sua fome!</Text>
+            <View style={sg.illustrationWrapper}>
+              <Image
+                source={require('../assets/bolsaprofile.png')}
+                style={sg.illustration}
+                resizeMode="contain"
+              />
+            </View>
           </View>
-          <View style={ag.lockBadge}>
-            <Ionicons name="lock-closed" size={11} color="#fff" />
-          </View>
-        </View>
 
-        <Text style={ag.title}>Meu Perfil</Text>
-        <Text style={ag.sub}>
-          Faça login para acessar seu perfil, endereços e histórico de pedidos.
-        </Text>
+          <Pressable style={sg.loginButton} onPress={() => setAuthSheetVisible(true)}>
+            <Text style={sg.loginButtonText}>Entrar ou cadastrar-se</Text>
+          </Pressable>
 
-        <View style={ag.warnBanner}>
-          <Ionicons name="information-circle" size={15} color="#FFB800" />
-          <Text style={ag.warnText}>
-            Não é possível acessar o perfil sem uma conta ativa.
-          </Text>
-        </View>
+          {/* Notificações — sem accordion, abre a page direto (gated) */}
+          <Pressable
+            style={sg.simpleRow}
+            onPress={() => requireAuth(() => router.push('/notifications'))}
+          >
+            <View style={sg.iconBox}>
+              <Ionicons name="notifications-outline" size={22} color="#1A1A1A" />
+            </View>
+            <Text style={sg.simpleRowTitle}>Notificações</Text>
+            <Ionicons name="chevron-forward" size={18} color="#1A1A1A" />
+          </Pressable>
+          <View style={sg.divider} />
 
-        <Pressable style={ag.btnPrimary} onPress={() => router.push('/auth/login')}>
-          <View style={ag.btnInner}>
-            <Text style={ag.btnPrimaryText}>Entrar na conta</Text>
-            <Ionicons name="arrow-forward" size={15} color="#fff" />
-          </View>
-        </Pressable>
+          {/* Conta -> só Endereços */}
+          <ProfileAccordionItem
+            icon="person-outline"
+            title="Conta"
+            subtitle="Endereços"
+            items={[
+              {
+                label: 'Endereços',
+                onPress: () => requireAuth(() => router.push('/addresses')),
+              },
+            ]}
+          />
 
-        <Pressable style={ag.btnSecondary} onPress={() => router.push('/auth/register')}>
-          <View style={ag.btnInner}>
-            <Ionicons name="person-add-outline" size={15} color="#FFB800" />
-            <Text style={ag.btnSecondaryText}>Criar conta</Text>
-          </View>
-        </Pressable>
+          {/* Configurações -> só Limpar histórico de busca */}
+          <ProfileAccordionItem
+            icon="settings-outline"
+            title="Configurações"
+            subtitle="Limpar histórico de busca"
+            items={[
+              { label: 'Limpar histórico de busca', onPress: handleClearHistory },
+            ]}
+          />
 
-        <Text style={ag.footer}>Rápido, gratuito e seus dados ficam seguros.</Text>
+          {/* Ajuda e Termos -> sem navegação por enquanto */}
+          <ProfileAccordionItem
+            icon="help-circle-outline"
+            title="Ajuda e Termos"
+            subtitle="Central de ajuda, termos de uso e políticas"
+            items={[
+              { label: 'Ajuda', onPress: () => {} },
+              { label: 'Termos de Uso', onPress: () => {} },
+              { label: 'Política de Privacidade', onPress: () => {} },
+            ]}
+          />
+
+          <Text style={sg.versionText}>Batata Top v2.2.0</Text>
+        </ScrollView>
+
+        <AuthBottomSheet
+          visible={authSheetVisible}
+          onClose={() => setAuthSheetVisible(false)}
+        />
       </View>
     );
   }
@@ -295,6 +373,12 @@ export default function Profile() {
             <Ionicons name="mail-outline" size={14} color="#999" />
             <Text style={s.userEmail}>{user?.email}</Text>
           </View>
+          {!!user?.user_metadata?.cpf && (
+            <View style={s.cpfRow}>
+              <Ionicons name="card-outline" size={14} color="#999" />
+              <Text style={s.userCpf}>{formatCpfDisplay(user.user_metadata.cpf)}</Text>
+            </View>
+          )}
         </View>
 
         {/* Seção Dados e Segurança */}
@@ -461,108 +545,80 @@ export default function Profile() {
   );
 }
 
-// Estilos de deslogado (Gating)
-const ag = StyleSheet.create({
-  wrap: {
+// Estilos da tela de perfil deslogado (soft logout) — clone do perfil do
+// iFood. Cores fixas em hex de propósito (é a paleta do print de
+// referência, não a marca da Batata Top) — troca por COLORS.* se quiser
+// alinhar com o resto do tema.
+const sg = StyleSheet.create({
+  container: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 30,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFFFFF',
   },
-  iconWrap: {
-    position: 'relative',
-    marginBottom: 20,
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 40,
   },
-  iconCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#FFF8E7',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  lockBadge: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    backgroundColor: '#FFB800',
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#F8F9FA',
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#1A1A1A',
-    marginBottom: 8,
-  },
-  sub: {
-    fontSize: 13,
-    color: '#666666',
-    textAlign: 'center',
-    lineHeight: 18,
-    marginBottom: 20,
-  },
-  warnBanner: {
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#FFF8E7',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#FFE0B2',
+    justifyContent: 'space-between',
     marginBottom: 24,
   },
-  warnText: {
-    fontSize: 11,
-    color: '#E65100',
-    fontWeight: '600',
+  headerText: {
+    flex: 1,
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    paddingRight: 12,
   },
-  btnPrimary: {
-    backgroundColor: '#FFB800',
-    height: 48,
-    borderRadius: 24,
-    width: '100%',
+  illustrationWrapper: {
+    width: 110,
+    height: 110,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
   },
-  btnSecondary: {
-    backgroundColor: '#FFFFFF',
+  illustration: {
+    width: 100,
+    height: 100,
+  },
+  loginButton: {
     borderWidth: 1.5,
     borderColor: '#FFB800',
-    height: 48,
-    borderRadius: 24,
-    width: '100%',
+    borderRadius: 8,
+    paddingVertical: 15,
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 24,
+    marginBottom: 28,
   },
-  btnInner: {
+  loginButtonText: {
+    color: '#FFB800',
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  iconBox: {
+    width: 26,
+    alignItems: 'center',
+    marginRight: 14,
+  },
+  simpleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    paddingVertical: 18,
   },
-  btnPrimaryText: {
-    color: '#FFFFFF',
-    fontWeight: '800',
-    fontSize: 14,
+  simpleRowTitle: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#1A1A1A',
   },
-  btnSecondaryText: {
-    color: '#FFB800',
-    fontWeight: '800',
-    fontSize: 14,
+  divider: {
+    height: 1,
+    backgroundColor: '#EFEFEF',
   },
-  footer: {
-    fontSize: 11,
-    color: '#999999',
+  versionText: {
+    fontSize: 12,
+    color: '#B0B0B0',
+    marginTop: 20,
   },
 });
 
@@ -636,6 +692,17 @@ const s = StyleSheet.create({
     gap: 6,
   },
   userEmail: {
+    fontSize: 13,
+    color: '#666666',
+    fontWeight: '500',
+  },
+  cpfRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+  },
+  userCpf: {
     fontSize: 13,
     color: '#666666',
     fontWeight: '500',

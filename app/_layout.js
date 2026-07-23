@@ -19,6 +19,7 @@ import AdminPushRegistration from '../components/AdminPushRegistration';
 import EntrarBanner from '../components/EntrarBanner';
 import AuthBottomSheet from '../components/AuthBottomSheet';
 import AnimatedSplash from '../components/AnimatedSplash';
+import CartBar from '../components/CartBar';
 
 /* ============================================================
    CONTEXTO DE DIREÇÃO DE NAVEGAÇÃO
@@ -570,6 +571,7 @@ function Header({ onHeightChange, onRegisterReset }) {
   const isCheckoutPage = pathname.includes('checkout');
   const isWelcomePage = pathname.includes('welcome');
   const isLocationPage = pathname.includes('location');
+  const isCardapioPage = pathname.includes('cardapio');
 
   useEffect(() => {
     if (!authResolved) return;
@@ -588,7 +590,7 @@ function Header({ onHeightChange, onRegisterReset }) {
     }
   }, [isAddressPage, user, authResolved]);
 
-  if (isAuthPage || isProdutoPage || isCheckoutPage || isAddressPage || isWelcomePage || isLocationPage) return null;
+  if (isAuthPage || isProdutoPage || isCheckoutPage || isAddressPage || isWelcomePage || isLocationPage || isCardapioPage) return null;
 
   return (
     <>
@@ -663,72 +665,7 @@ function Header({ onHeightChange, onRegisterReset }) {
   );
 }
 
-/* ============================================================
-   CART BAR — SACOLA FLUTUANTE
-   Aparece com slide-up quando há itens, some quando o carrinho está vazio
-   ou quando o usuário já está na tela de cart/checkout.
-   ============================================================ */
-function CartBar() {
-  const router   = useRouter();
-  const pathname = usePathname();
-  const { count: totalItems, total, hideFloating } = useCart();
-  const subtotal = total / 100;
-  const tabBarHeight = useTabBarHeight();
 
-  const translateY = useRef(new Animated.Value(120)).current;
-  const wasVisible = useRef(false);
-
-  const isCartPage = pathname.includes('cart') || pathname.includes('checkout');
-  const isWelcomePage = pathname.includes('welcome');
-  const isLocationPage = pathname.includes('location');
-  const shouldShow = totalItems > 0 && !isCartPage && !isWelcomePage && !isLocationPage && !hideFloating;
-
-  useEffect(() => {
-    if (shouldShow && !wasVisible.current) {
-      wasVisible.current = true;
-      Animated.spring(translateY, {
-        toValue: 0,
-        useNativeDriver: true,
-        tension: 70,
-        friction: 12,
-      }).start();
-    } else if (!shouldShow && wasVisible.current) {
-      wasVisible.current = false;
-      Animated.timing(translateY, {
-        toValue: 120,
-        duration: 200,
-        useNativeDriver: true,
-      }).start();
-    }
-  }, [shouldShow]);
-
-  const opacity = translateY.interpolate({
-    inputRange: [0, 80],
-    outputRange: [1, 0],
-    extrapolate: 'clamp',
-  });
-
-  return (
-    <Animated.View style={[s.cartBar, { bottom: tabBarHeight + 23, transform: [{ translateY }], opacity }]} pointerEvents={shouldShow ? 'auto' : 'none'}>
-      <Pressable style={s.cartBarInner} onPress={() => router.push('/cart')}>
-        <View style={s.cartBarLeft}>
-          <View style={s.cartBarBadge}>
-            <Text style={s.cartBarBadgeText}>{totalItems}</Text>
-          </View>
-          <Text style={s.cartBarLabel}>Ver sacola</Text>
-        </View>
-        <Text style={s.cartBarTotal}>
-          R$ {subtotal.toFixed(2).replace('.', ',')}
-        </Text>
-        <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
-      </Pressable>
-    </Animated.View>
-  );
-}
-
-/* ============================================================
-   BOTTOM TAB BAR
-   ============================================================ */
 const TAB_ORDER = ['index', 'cardapio', 'pedidos', 'profile'];
 
 function getTabIndex(pathname) {
@@ -745,7 +682,7 @@ function BottomTabBar({ onHeightChange }) {
   // Mesma regra que o Header já usa (isAuthPage) — a tab bar não deve
   // aparecer em cima da tela de login/cadastro, endereços (tela cheia,
   // estilo iFood) nem da tela de welcome/onboarding.
-  if (pathname.includes('produto') || pathname.includes('auth') || pathname.includes('addresses') || pathname.includes('welcome') || pathname.includes('location')) return null;
+  if (pathname.includes('produto') || pathname.includes('auth') || pathname.includes('addresses') || pathname.includes('welcome') || pathname.includes('location') || pathname.includes('cupons')) return null;
 
   const tabs = [
     { name: 'index',    label: 'Início',   icon: 'home',       iconOutline: 'home-outline' },
@@ -866,10 +803,12 @@ export default function RootLayout() {
         <>
           <AdminPushRegistration />
           <View style={{ flex: 1 }}>
-            <Header
-              onHeightChange={setHeaderHeight}
-              onRegisterReset={(fn) => { resetHeaderRef.current = fn; }}
-            />
+            {!pathname.includes('cupons') && (
+              <Header
+                onHeightChange={setHeaderHeight}
+                onRegisterReset={(fn) => { resetHeaderRef.current = fn; }}
+              />
+            )}
             <View style={{ flex: 1 }}>
               <Stack
                 screenOptions={{
@@ -879,7 +818,7 @@ export default function RootLayout() {
                 }}
               />
             </View>
-            <CartBar />
+            <CartBar tabBarHeight={tabBarHeight} />
             <BottomTabBar onHeightChange={setTabBarHeight} />
             {!pathname.includes('welcome') && !pathname.includes('location') && (
               <EntrarBanner onPress={() => setAuthSheetVisible(true)} tabBarHeight={tabBarHeight} />
@@ -983,50 +922,11 @@ const s = StyleSheet.create({
   },
   registerHeaderBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
 
-  /* ── Cart Bar (sacola flutuante) ── */
-  cartBar: {
-    position: 'absolute',
-    bottom: 85, // fica logo acima da BottomTabBar (altura ~62px + margem)
-    left: 16,
-    right: 16,
-    zIndex: 900,
-    borderRadius: 16,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    elevation: 12,
-  },
-  cartBarInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFB800',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    gap: 12,
-  },
-  cartBarLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 },
-  cartBarBadge: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    minWidth: 28, height: 28,
-    alignItems: 'center', justifyContent: 'center',
-    paddingHorizontal: 6,
-  },
-  cartBarBadgeText: { color: '#B8860B', fontWeight: '800', fontSize: 13 },
-  cartBarLabel:     { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
-  cartBarTotal:     { color: '#FFFFFF', fontWeight: '800', fontSize: 15 },
-
   /* ── Bottom Tab Bar ── */
   tabBar: {
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
-    borderTopWidth: 1, borderTopColor: '#ECE6DC',
     paddingBottom: 8, paddingTop: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.05, shadowRadius: 4, elevation: 5,
   },
   tabItem: {
     flex: 1, alignItems: 'center', justifyContent: 'center',

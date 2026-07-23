@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
+  Image,
   Pressable,
   StyleSheet,
   Linking,
@@ -54,6 +55,13 @@ export default function AuthBottomSheet({ visible, onClose }: AuthBottomSheetPro
   // do topo do painel (RADIUS['2xl']), senão sobra uma frestinha bem na
   // pontinha da curva.
   const IMAGE_OVERLAP = 80;
+
+  // Distância real até o fim da tela: insets.bottom já muda sozinho conforme
+  // o aparelho está em navegação por gestos (barrinha fina, inset pequeno)
+  // ou por botões (inset maior por causa da barra do sistema) — por isso
+  // basta somar ao respiro padrão em vez de usar um valor fixo, senão o
+  // conteúdo cola na barra de botões ou sobra espaço demais no modo gesto.
+  const bottomPadding = SPACING[8] + insets.bottom;
 
   const translateY = useSharedValue(SCREEN_HEIGHT);
   const backdropOpacity = useSharedValue(0);
@@ -260,12 +268,18 @@ export default function AuthBottomSheet({ visible, onClose }: AuthBottomSheetPro
       console.log('✅ Sessão confirmada — navegando pra home...');
       onClose();
       router.replace('/');
-    } catch (err) {
+    } catch (err: unknown) {
+      // err chega como `unknown` (TS estrito) — não dá pra acessar
+      // err.message/.code/.status direto sem antes checar o tipo, senão o
+      // compilador acusa erro. supabase-js lança objetos parecidos com
+      // Error mas às vezes com .code/.status extras, então fazemos um
+      // narrowing manual em vez de simplesmente tipar como `any`.
+      const errObj = err as { message?: unknown; code?: unknown; status?: unknown } | null;
       console.error('❌ ❌ ❌ ERRO em handleContinuarComo:', {
-        message: err?.message,
-        code: err?.code,
-        status: err?.status,
-        fullError: err
+        message: errObj?.message,
+        code: errObj?.code,
+        status: errObj?.status,
+        fullError: err,
       });
 
       console.log('📵 Fallback: Abrindo login de novo');
@@ -399,24 +413,49 @@ export default function AuthBottomSheet({ visible, onClose }: AuthBottomSheetPro
             enquanto outro está visível, sem pulos na troca. */}
         <Animated.View style={[styles.content, panelStyle]}>
           <Animated.View
-            style={[styles.stateBlock, blockBStyle]}
+            style={[styles.stateBlock, blockBStyle, { paddingBottom: bottomPadding }]}
             onLayout={handleLayoutB}
             pointerEvents={estado === 'B' && savedUser ? 'auto' : 'none'}
           >
             {savedUser ? (
               <>
+                <Text style={styles.welcomeTitle}>Que bom te ver novamente</Text>
+
+                <View style={styles.foundLoginRow}>
+                  <View style={styles.avatarCircle}>
+                    <Image
+                      source={require('../assets/batatanacaixa.png')}
+                      style={styles.avatarImage}
+                      resizeMode="cover"
+                    />
+                  </View>
+                  <View style={styles.foundLoginTextCol}>
+                    <Text style={styles.foundLoginLabel}>Encontramos seu último login</Text>
+                    <Text style={styles.foundLoginValue} numberOfLines={1}>
+                      {savedUser.email || savedUser.phone}
+                    </Text>
+                  </View>
+                </View>
+
                 <Pressable style={styles.btnFilled} onPress={handleContinuarComo}>
-                  <Text style={styles.btnFilledText}>Continuar como {savedUser.name}</Text>
+                  <Text style={styles.btnFilledText}>Continuar</Text>
                 </Pressable>
-                <Pressable style={styles.btnOutline} onPress={handleAcessarOutraConta}>
-                  <Text style={styles.btnOutlineText}>Acessar outra conta</Text>
+
+                <View style={styles.dividerRow}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>ou</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+
+                <Pressable style={styles.btnTextOnly} onPress={handleAcessarOutraConta} hitSlop={8}>
+                  <Text style={styles.linkAccessOtherText}>Acessar de outra forma</Text>
                 </Pressable>
               </>
             ) : null}
           </Animated.View>
 
           <Animated.View
-            style={[styles.stateBlock, blockAStyle]}
+            style={[styles.stateBlock, blockAStyle, { paddingBottom: bottomPadding }]}
             onLayout={handleLayoutA}
             pointerEvents={estado === 'A' ? 'auto' : 'none'}
           >
@@ -439,7 +478,7 @@ export default function AuthBottomSheet({ visible, onClose }: AuthBottomSheetPro
           </Animated.View>
 
           <Animated.View
-            style={[styles.stateBlock, blockCStyle]}
+            style={[styles.stateBlock, blockCStyle, { paddingBottom: bottomPadding }]}
             onLayout={handleLayoutC}
             pointerEvents={estado === 'C' ? 'auto' : 'none'}
           >
@@ -567,6 +606,66 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // Estado B — "Que bom te ver novamente"
+  welcomeTitle: {
+    fontSize: TYPOGRAPHY.sizes.lg,
+    fontWeight: '700',
+    color: COLORS.text,
+    textAlign: 'center',
+    marginBottom: SPACING[5],
+  },
+  foundLoginRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: SPACING[5],
+  },
+  avatarCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FDECEC',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: SPACING[3],
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  foundLoginTextCol: {
+    flex: 1,
+  },
+  foundLoginLabel: {
+    color: COLORS.textMuted,
+    fontSize: TYPOGRAPHY.sizes.sm,
+    marginBottom: 2,
+  },
+  foundLoginValue: {
+    color: COLORS.text,
+    fontWeight: '700',
+    fontSize: TYPOGRAPHY.sizes.base,
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: SPACING[5],
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: COLORS.border,
+  },
+  dividerText: {
+    color: COLORS.textMuted,
+    fontSize: TYPOGRAPHY.sizes.sm,
+    marginHorizontal: SPACING[3],
+  },
+  linkAccessOtherText: {
+    color: COLORS.primary,
+    fontWeight: '700',
+    fontSize: TYPOGRAPHY.sizes.base,
   },
   // Estado C — "Como deseja continuar?"
   comoContinuarTitle: {

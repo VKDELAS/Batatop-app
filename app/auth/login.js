@@ -13,13 +13,43 @@ import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
-import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, interpolate, Extrapolation } from 'react-native-reanimated';
 import { supabase } from '../../supabaseConfig';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOWS } from '../../constants/theme';
 
 const RESEND_SECONDS = 59;
 const SAVED_USER_KEY = '@batatatop:savedUser';
+
+// Aplica a máscara 000.000.000-00 enquanto o usuário digita.
+const formatCpf = (value) => {
+  const digits = value.replace(/\D/g, '').slice(0, 11);
+  return digits
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+};
+
+// Validação do dígito verificador (mod-11) — confirma que o número é
+// matematicamente possível, NÃO que a pessoa é titular dele (isso exigiria
+// consulta paga à Receita Federal, ex: Serpro DataValid, com consentimento LGPD).
+const isValidCpf = (digits) => {
+  if (digits.length !== 11 || /^(\d)\1{10}$/.test(digits)) return false;
+
+  const calcCheckDigit = (base) => {
+    let sum = 0;
+    for (let i = 0; i < base.length; i++) {
+      sum += parseInt(base[i], 10) * (base.length + 1 - i);
+    }
+    const rest = (sum * 10) % 11;
+    return rest === 10 ? 0 : rest;
+  };
+
+  const digit1 = calcCheckDigit(digits.slice(0, 9));
+  const digit2 = calcCheckDigit(digits.slice(0, 9) + digit1);
+
+  return digit1 === parseInt(digits[9], 10) && digit2 === parseInt(digits[10], 10);
+};
 
 // Salva o essencial pra tela "continuar como [nome]" reconhecer o
 // usuário na próxima vez que o app abrir (mesmo depois de sair/reinstalar
@@ -70,13 +100,25 @@ export default function LoginScreen() {
   const [helpVisible, setHelpVisible] = useState(false);
   const codeRefs = useRef([]);
 
-  const [name, setName] = useState('');
-  const [nameFocused, setNameFocused] = useState(false);
+  const [firstName, setFirstName] = useState('');
+  const [firstNameFocused, setFirstNameFocused] = useState(false);
+  const [lastName, setLastName] = useState('');
+  const [lastNameFocused, setLastNameFocused] = useState(false);
   const [nameSaving, setNameSaving] = useState(false);
-  const nameRef = useRef(null);
+  const firstNameRef = useRef(null);
+  const lastNameRef = useRef(null);
+
+  // CPF é opcional — nunca bloqueia o fluxo, só valida o dígito
+  // verificador (mod-11) pra avisar de erro de digitação, sem checar
+  // titularidade (isso exigiria API paga tipo Serpro + consentimento LGPD).
+  const [cpf, setCpf] = useState('');
+  const [cpfFocused, setCpfFocused] = useState(false);
+  const cpfRef = useRef(null);
 
   const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  const isNameValid = name.trim().length >= 2;
+  const isNameValid = firstName.trim().length >= 2 && lastName.trim().length >= 2;
+  const cpfDigits = cpf.replace(/\D/g, '');
+  const isCpfValid = cpfDigits.length === 0 || isValidCpf(cpfDigits);
 
   // Posição do footer acompanhando o teclado — via react-native-keyboard-
   // controller. Diferente do Keyboard API do RN, esse hook lê o inset do
@@ -88,6 +130,16 @@ export default function LoginScreen() {
   const { height: keyboardHeight } = useReanimatedKeyboardAnimation();
   const footerAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: keyboardHeight.value }],
+    // Com teclado fechado, soma insets.bottom (home indicator). Com teclado
+    // aberto, encolhe pra 26 puro — senão sobra um respiro entre o botão e
+    // o teclado equivalente ao insets.bottom, mesmo com o footer já
+    // acompanhando o teclado via translateY.
+    paddingBottom: interpolate(
+      keyboardHeight.value,
+      [-1, 0],
+      [26, 26 + insets.bottom],
+      Extrapolation.CLAMP
+    ),
   }));
 
   // Foco automático do campo de e-mail/nome — com um pequeno atraso pra
@@ -100,7 +152,7 @@ export default function LoginScreen() {
       return () => clearTimeout(t);
     }
     if (step === 'name') {
-      const t = setTimeout(() => nameRef.current?.focus(), 300);
+      const t = setTimeout(() => firstNameRef.current?.focus(), 300);
       return () => clearTimeout(t);
     }
   }, [step]);
@@ -193,10 +245,11 @@ export default function LoginScreen() {
   const handleNameContinue = async () => {
     if (!isNameValid || nameSaving) return;
     setNameSaving(true);
-    const trimmedName = name.trim();
+    const trimmedName = `${firstName.trim()} ${lastName.trim()}`.trim();
 
     const { error } = await supabase.auth.updateUser({
-      data: { full_name: trimmedName },
+      // cpf só entra se o usuário preencheu — campo opcional, nunca bloqueia.
+      data: { full_name: trimmedName, ...(cpfDigits && { cpf: cpfDigits }) },
     });
     setNameSaving(false);
 
@@ -253,9 +306,13 @@ export default function LoginScreen() {
     }
   };
 
-  const handleBack = () => {
+  const handleBack = async () => {
     if (step === 'name') {
-      // Não deixa voltar pro código depois de verificado — volta pro início.
+      // BUG CORRIGIDO: o verifyOtp já cria a sessão real no Supabase assim
+      // que o código é confirmado — nome/CPF são só um passo posterior.
+      // Sem o signOut abaixo, sair daqui deixava a sessão ativa e a pessoa
+      // aparecia logada na Home sem nunca ter preenchido o nome (obrigatório).
+      await supabase.auth.signOut();
       router.replace('/');
     } else if (step === 'code') {
       setStep('email');
@@ -375,37 +432,98 @@ export default function LoginScreen() {
 
           {step === 'name' && (
             <>
-              <Text style={styles.title}>Como podemos te chamar?</Text>
+              <Text style={[styles.title, styles.titleCompact]}>Complete as informações da sua conta</Text>
+              <Text style={styles.subtitle}>
+                Cadastre seus dados para identificação na loja e maior segurança da conta
+              </Text>
+
+              <Text style={styles.sectionLabel}>Qual o seu nome e sobrenome?</Text>
 
               <View
-                style={[styles.inputWrapper, nameFocused && styles.inputWrapperFocused]}
+                style={[styles.plainInput, firstNameFocused && styles.plainInputFocused]}
               >
-                <Text style={styles.inputLabel}>Nome</Text>
                 <TextInput
-                  ref={nameRef}
+                  ref={firstNameRef}
                   style={styles.input}
-                  placeholder="Seu nome"
+                  placeholder="Nome"
                   placeholderTextColor="#999"
-                  value={name}
-                  onChangeText={setName}
-                  onFocus={() => setNameFocused(true)}
-                  onBlur={() => setNameFocused(false)}
+                  value={firstName}
+                  onChangeText={setFirstName}
+                  onFocus={() => setFirstNameFocused(true)}
+                  onBlur={() => setFirstNameFocused(false)}
                   autoCapitalize="words"
                   autoCorrect={false}
+                  returnKeyType="next"
+                  onSubmitEditing={() => lastNameRef.current?.focus()}
                 />
               </View>
+
+              <View
+                style={[styles.plainInput, lastNameFocused && styles.plainInputFocused]}
+              >
+                <TextInput
+                  ref={lastNameRef}
+                  style={styles.input}
+                  placeholder="Sobrenome"
+                  placeholderTextColor="#999"
+                  value={lastName}
+                  onChangeText={setLastName}
+                  onFocus={() => setLastNameFocused(true)}
+                  onBlur={() => setLastNameFocused(false)}
+                  autoCapitalize="words"
+                  autoCorrect={false}
+                  returnKeyType="next"
+                  onSubmitEditing={() => cpfRef.current?.focus()}
+                />
+              </View>
+
+              <Text style={[styles.sectionLabel, styles.cpfSectionLabel]}>Qual seu CPF?</Text>
+
+              <View
+                style={[
+                  styles.plainInput,
+                  cpfFocused && styles.plainInputFocused,
+                  !isCpfValid && styles.plainInputError,
+                ]}
+              >
+                <TextInput
+                  ref={cpfRef}
+                  style={styles.input}
+                  placeholder="CPF (opcional)"
+                  placeholderTextColor="#999"
+                  value={cpf}
+                  onChangeText={(v) => setCpf(formatCpf(v))}
+                  onFocus={() => setCpfFocused(true)}
+                  onBlur={() => setCpfFocused(false)}
+                  keyboardType="number-pad"
+                  maxLength={14}
+                  returnKeyType="done"
+                  onSubmitEditing={handleNameContinue}
+                />
+              </View>
+              {!isCpfValid && (
+                <Text style={styles.cpfErrorText}>CPF inválido — confira os números</Text>
+              )}
             </>
           )}
         </View>
 
         {(step === 'email' || step === 'name') && (
-          <Animated.View style={[styles.footerAvoider, footerAnimatedStyle]}>
-            <View style={styles.footer}>
-              <Text style={styles.helperText}>
-                {step === 'email'
-                  ? "Enviaremos comunicações sobre sua conta neste e-mail. Pra cancelar a inscrição acesse 'Configurações'."
-                  : 'Usamos seu nome só pra te chamar direitinho dentro do app.'}
-              </Text>
+          <View style={styles.footerAvoider}>
+            <Animated.View style={[styles.footer, footerAnimatedStyle]}>
+              {step === 'email' ? (
+                <Text style={styles.helperText}>
+                  Enviaremos comunicações sobre sua conta neste e-mail. Pra cancelar a inscrição acesse 'Configurações'.
+                </Text>
+              ) : (
+                <>
+                  <Text style={styles.termsText}>
+                    Ao continuar, você concorda com os{' '}
+                    <Text style={styles.termsLink}>Termos de Uso</Text> e está ciente da{' '}
+                    <Text style={styles.termsLink}>Declaração de Privacidade</Text>
+                  </Text>
+                </>
+              )}
               <TouchableOpacity
                 style={[
                   styles.continueButton,
@@ -423,12 +541,12 @@ export default function LoginScreen() {
                       isFooterValid ? styles.continueButtonTextActive : styles.continueButtonTextDisabled,
                     ]}
                   >
-                    Continuar
+                    {step === 'email' ? 'Continuar' : 'Criar conta'}
                   </Text>
                 )}
               </TouchableOpacity>
-            </View>
-          </Animated.View>
+            </Animated.View>
+          </View>
         )}
       </View>
 
@@ -522,6 +640,15 @@ const styles = StyleSheet.create({
   titleBold: {
     fontWeight: '800',
   },
+  titleCompact: {
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    lineHeight: 20,
+    marginBottom: 28,
+  },
 
   // ── Input de e-mail / nome (label flutuante estilo outline) ────────
   inputWrapper: {
@@ -538,6 +665,40 @@ const styles = StyleSheet.create({
   inputWrapperFocused: {
     borderWidth: 2,
     borderColor: COLORS.text,
+  },
+  cpfErrorText: {
+    fontSize: 12,
+    color: COLORS.error,
+    marginTop: 6,
+    marginBottom: 4,
+  },
+
+  // ── Section label + inputs sem label flutuante (Nome/Sobrenome/CPF) ─
+  sectionLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 12,
+  },
+  cpfSectionLabel: {
+    marginTop: 8,
+  },
+  plainInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 52,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  plainInputFocused: {
+    borderWidth: 2,
+    borderColor: COLORS.text,
+  },
+  plainInputError: {
+    borderColor: COLORS.error,
   },
   inputLabel: {
     position: 'absolute',
@@ -563,6 +724,16 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     marginBottom: 16,
   },
+  termsText: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    lineHeight: 17,
+    marginBottom: 16,
+  },
+  termsLink: {
+    color: COLORS.text,
+    fontWeight: '700',
+  },
 
   // ── Footer fixo do botão continuar (acompanha o teclado) ───────────
   footerAvoider: {
@@ -575,7 +746,6 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
     paddingHorizontal: 24,
     paddingTop: 12,
-    paddingBottom: 26,
   },
 
   // ── Botão continuar ────────────────────────────────────────────────

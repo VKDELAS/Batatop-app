@@ -59,7 +59,7 @@ export function initAuthStateListener() {
       return;
     }
 
-    if (event === 'SIGNED_IN' && session) {
+      if (event === 'SIGNED_IN' && session) {
       const soft = await AsyncStorage.getItem(SOFT_LOGOUT_KEY);
       if (soft === 'true') {
         await AsyncStorage.setItem(SOFT_LOGOUT_KEY, 'false');

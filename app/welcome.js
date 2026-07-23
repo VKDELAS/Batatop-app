@@ -9,7 +9,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Notifications from 'expo-notifications';
+import { safeGetNotificationPermissions, safeRequestNotificationPermissions } from '../utils/pushNotifications';
 
 // Chave usada pra marcar que o usuário já passou pela tela de boas-vindas.
 // Se precisar resetar o fluxo pra testar de novo, é só remover essa key
@@ -34,11 +34,11 @@ export default function WelcomeScreen() {
 
     try {
       // 1. Solicita a permissão real de notificações do sistema
-      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      const { status: existingStatus } = await safeGetNotificationPermissions();
       let finalStatus = existingStatus;
 
       if (existingStatus !== 'granted') {
-        const { status } = await Notifications.requestPermissionsAsync();
+        const { status } = await safeRequestNotificationPermissions();
         finalStatus = status;
         console.log('[welcome] status DEPOIS de pedir:', status); // TEMP — remover depois
       }

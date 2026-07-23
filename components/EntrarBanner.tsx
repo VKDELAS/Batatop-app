@@ -118,7 +118,7 @@ export default function EntrarBanner({ appName = 'Batata Top', onPress, tabBarHe
 
   return (
     <Animated.View
-      style={[styles.wrap, { bottom: shouldShow ? tabBarHeight + 24 : -200 }, rStyle]}
+      style={[styles.wrap, { bottom: shouldShow ? tabBarHeight + 15 : -200 }, rStyle]}
       pointerEvents={shouldShow ? 'auto' : 'none'}
     >
       <Pressable style={styles.card} onPress={onPress}>
@@ -138,11 +138,15 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: COLORS.white,
-    borderRadius: RADIUS.xl,
+    borderRadius: 10,
     paddingVertical: SPACING[4],
     paddingHorizontal: SPACING[5],
     alignItems: 'center',
-    ...SHADOWS.md,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
   },
   line1: {
     color: COLORS.textSecondary,

@@ -37,6 +37,30 @@ async function getNotifications() {
   return notificationsModule;
 }
 
+export async function safeGetNotificationPermissions() {
+  if (isRunningInExpoGo() && Platform.OS === 'android') {
+    return { status: 'undetermined' };
+  }
+  try {
+    const Notifications = await import('expo-notifications');
+    return await Notifications.getPermissionsAsync();
+  } catch (e) {
+    return { status: 'undetermined' };
+  }
+}
+
+export async function safeRequestNotificationPermissions() {
+  if (isRunningInExpoGo() && Platform.OS === 'android') {
+    return { status: 'undetermined' };
+  }
+  try {
+    const Notifications = await import('expo-notifications');
+    return await Notifications.requestPermissionsAsync();
+  } catch (e) {
+    return { status: 'undetermined' };
+  }
+}
+
 async function setupAndroidChannel() {
   if (Platform.OS !== 'android') return;
 

@@ -18,9 +18,9 @@ import { useRouter, useFocusEffect, Redirect } from 'expo-router';
 import { Image as ExpoImage } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState, useRef, useCallback, useEffect, memo } from 'react';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Notifications from 'expo-notifications';
+import { safeGetNotificationPermissions } from '../utils/pushNotifications';
 import { ALREADY_SEEN_WELCOME_KEY } from './welcome';
 import { ALREADY_SEEN_LOCATION_KEY } from './location';
 import * as Location from 'expo-location';
@@ -349,7 +349,7 @@ export default function Home() {
 
     (async () => {
       // 1) Etapa /welcome (notificações) — mesma regra de sempre.
-      const { status: notifStatus } = await Notifications.getPermissionsAsync();
+      const { status: notifStatus } = await safeGetNotificationPermissions();
       let welcomeNeeded;
       if (notifStatus === 'granted') {
         welcomeNeeded = false;
@@ -564,12 +564,18 @@ export default function Home() {
         </View>
 
         <View style={s.section}>
-          <View style={s.sectionRow}>
-            <Text style={s.sectionTitle}>Batatas mais pedidas</Text>
-            <Pressable onPress={() => router.push('/cardapio')} style={s.verTodos}>
-              <Text style={s.verTodosText}>Ver todos</Text>
-              <Ionicons name="chevron-forward" size={13} color={COLORS.primary} />
-            </Pressable>
+          <View style={s.cardapioHeaderWrap}>
+            <View style={s.cardapioHeaderRow}>
+              <View style={s.cardapioHeaderLeft}>
+                <MaterialCommunityIcons name="carrot" size={30} color={COLORS.primary} />
+                <Text style={s.cardapioTitle} numberOfLines={1}>Batatas mais pedidas</Text>
+              </View>
+              <Pressable onPress={() => router.push('/cardapio')} style={s.verTodos}>
+                <Text style={s.verTodosText}>Ver todos</Text>
+                <Ionicons name="chevron-forward" size={13} color={COLORS.primary} />
+              </Pressable>
+            </View>
+            <Text style={s.cardapioDesc}>Crocantes por fora, recheadas por dentro e feitas na hora</Text>
           </View>
 
           {loading ? (
@@ -586,12 +592,18 @@ export default function Home() {
         </View>
 
         <View style={s.section}>
-          <View style={s.sectionRow}>
-            <Text style={s.sectionTitle}>Macarrão mais pedidos</Text>
-            <Pressable onPress={() => router.push('/cardapio')} style={s.verTodos}>
-              <Text style={s.verTodosText}>Ver todos</Text>
-              <Ionicons name="chevron-forward" size={13} color={COLORS.primary} />
-            </Pressable>
+          <View style={s.cardapioHeaderWrap}>
+            <View style={s.cardapioHeaderRow}>
+              <View style={s.cardapioHeaderLeft}>
+                <MaterialCommunityIcons name="pasta" size={30} color={COLORS.primary} />
+                <Text style={s.cardapioTitle} numberOfLines={1}>Macarrão mais pedidos</Text>
+              </View>
+              <Pressable onPress={() => router.push('/cardapio')} style={s.verTodos}>
+                <Text style={s.verTodosText}>Ver todos</Text>
+                <Ionicons name="chevron-forward" size={13} color={COLORS.primary} />
+              </Pressable>
+            </View>
+            <Text style={s.cardapioDesc}>Massas artesanais com molhos irresistíveis</Text>
           </View>
 
           {loading ? (
@@ -652,6 +664,39 @@ const s = StyleSheet.create({
     color: COLORS.primary,
     fontWeight: '600',
     fontSize: TYPOGRAPHY.sizes.sm,
+  },
+
+  // ── HEADER DE SEÇÃO COM ÍCONE (ex: "Batatas mais pedidas", "Macarrão
+  // mais pedidos") — ícone amarelo "solto" (sem fundo/box) à esquerda do
+  // título, descrição cinza colada logo abaixo, alinhada com o início do
+  // texto do título (não com o ícone) ──
+  cardapioHeaderWrap: {
+    paddingHorizontal: SPACING[6],
+  },
+  cardapioHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: SPACING[3],
+  },
+  cardapioHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING[2],
+    flexShrink: 1,
+  },
+  cardapioTitle: {
+    color: COLORS.text,
+    fontWeight: '700',
+    fontSize: TYPOGRAPHY.sizes.lg,
+    letterSpacing: -0.3,
+    flexShrink: 1,
+  },
+  cardapioDesc: {
+    color: COLORS.textMuted,
+    fontSize: TYPOGRAPHY.sizes.sm,
+    marginTop: 1,
+    marginLeft: 30 + SPACING[2],
   },
 
   // ── CATEGORIAS (grid 3x2, estilo iFood — sem sombra/borda) ─────────────────

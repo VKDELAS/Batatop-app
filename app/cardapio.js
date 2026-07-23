@@ -3,22 +3,24 @@ import {
   Text,
   FlatList,
   StyleSheet,
-  Animated,
   Pressable,
   ActivityIndicator,
   TextInput,
   Image,
   ScrollView,
+  Animated,
 } from 'react-native';
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import { useState, useRef, useEffect, memo } from 'react';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Image as ExpoImage } from 'expo-image';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../constants/theme';
-import { useProdutos, useProdutosPorCategoria, useBuscarProdutos } from './hooks/useProdutos';
-import { useScrollHandler, useHeaderHeight } from './_layout';
+import { useProductRanking } from './hooks/useProductRanking';
+import { useBuscarProdutos } from './hooks/useProdutos';
+import { useCart } from '../utils/cartStore';
 
 // MAPEAMENTO: label visível → valor exato no campo `category` do Supabase
-// Se o banco usar 'Batatas' com maiúscula, troque aqui.
 const CATEGORIA_MAP = {
   'Todas':   'Todas',
   'Batatas': 'batata',
@@ -26,333 +28,349 @@ const CATEGORIA_MAP = {
   'Bebidas': 'bebida',
 };
 
-// Ícone Ionicons por categoria
-const CATEGORIA_ICON = {
-  'Todas':   'grid-outline',
-  'Batatas': 'leaf-outline',
-  'Macarrão':'restaurant-outline',
-  'Bebidas': 'cafe-outline',
+// tira acento e deixa minúsculo — mesma função do index.js, usada pra
+// separar os produtos por categoria sem depender de acento/maiúscula do banco
+const normalizarCategoria = (str) =>
+  (str || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+// ─── Fallbacks de imagem por categoria (mesmos do index.js) ───────────────────
+const PROD_IMG_FALLBACKS = {
+  batatas: 'https://images.unsplash.com/photo-1518013391915-e40643a1bce1?w=600',
+  bebidas: 'https://images.unsplash.com/photo-1544145945-f904253d0c7b?w=600',
+  macarrao: 'https://images.unsplash.com/photo-1551183053-bf91a1d81141?w=600',
 };
 
-// ─── PressableScale ───────────────────────────────────────────────────────────
-function PressableScale({ children, onPress, style }) {
-  const scale = useRef(new Animated.Value(1)).current;
-  const onIn  = () => Animated.timing(scale, { toValue: 0.96, duration: 100, useNativeDriver: true }).start();
-  const onOut = () => Animated.timing(scale, { toValue: 1,    duration: 180, useNativeDriver: true }).start();
-  return (
-    <Pressable onPress={onPress} onPressIn={onIn} onPressOut={onOut} style={style}>
-      <Animated.View style={{ transform: [{ scale }] }}>{children}</Animated.View>
-    </Pressable>
-  );
-}
+// Ícone 3D da aba "Todas"
+const ICONE_TODAS = require('../assets/icones3d/iconetodos.png');
 
-// ─── Fallbacks de imagem ──────────────────────────────────────────────────────
-const IMG_FALLBACK = {
-  batatas:  'https://images.unsplash.com/photo-1518013391915-e40643a1bce1?w=400',
-  macarrao: 'https://images.unsplash.com/photo-1551183053-bf91a1d81141?w=400',
-  bebidas:  'https://images.unsplash.com/photo-1544145945-f904253d0c7b?w=400',
-};
-function fallback(cat) {
-  const k = (cat ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  return IMG_FALLBACK[k] ?? IMG_FALLBACK.batatas;
-}
+// Nome do restaurante — troque aqui se precisar
+const NOME_RESTAURANTE = 'Batata Top - Delivery';
 
-// ─── ProdutoCard ──────────────────────────────────────────────────────────────
-function ProdutoCard({ produto }) {
+// Textos que ficam "rolando" dentro da barra de busca
+const SUGESTOES_BUSCA = [
+  `Buscar em ${NOME_RESTAURANTE}`,
+  'Experimente nossas Batatas recheadas',
+  'Peça um Macarrão bem quentinho',
+  'Bebidas geladas pra acompanhar',
+];
+
+// Seções do cardápio, na ordem em que aparecem na tela — Batatas sempre
+// primeiro, depois Macarrão, depois Bebidas. Dentro de cada uma os produtos
+// já vêm ordenados do mais pedido pro menos pedido (ordem do ranking).
+const SECOES = [
+  {
+    tab: 'Batatas',
+    filtro: 'batata',
+    titulo: 'Batatas',
+    descricao: 'Crocantes por fora, recheadas por dentro e feitas na hora',
+    icon: 'carrot',
+  },
+  {
+    tab: 'Macarrão',
+    filtro: 'macarrao',
+    titulo: 'Macarrão',
+    descricao: 'Massas artesanais com molhos irresistíveis',
+    icon: 'pasta',
+  },
+  {
+    tab: 'Bebidas',
+    filtro: 'bebida',
+    titulo: 'Bebidas',
+    descricao: 'Geladinhas pra acompanhar seu pedido',
+    icon: 'cup',
+  },
+];
+
+const TABS = ['Todas', 'Batatas', 'Macarrão', 'Bebidas'];
+
+// ─── ProdutoCard (mesmo card grande do index.js — imagem, nome, desc, tags,
+// preço e botão de adicionar) ──────────────────────────────────────────────
+const ProdutoCard = memo(function ProdutoCard({ produto }) {
   const router = useRouter();
-  const [imgErr, setImgErr] = useState(false);
+  const [useFallback, setUseFallback] = useState(false);
+
+  const imageSource = useFallback
+    ? { uri: PROD_IMG_FALLBACKS[produto.categoria?.toLowerCase()] || PROD_IMG_FALLBACKS.batatas }
+    : { uri: produto.imagem };
 
   return (
-    <Pressable
-      style={s.card}
-      onPress={() => router.push(`/produto/${produto.id}`)}
-    >
-      {/* Imagem */}
-      <View style={s.imgBox}>
-        <Image
-          source={{ uri: imgErr ? fallback(produto.categoria) : produto.imagem }}
-          style={s.img}
-          onError={() => setImgErr(true)}
+    <Pressable style={s.prodCard} onPress={() => router.push(`/produto/${produto.id}`)}>
+      <View style={s.prodImgWrapper}>
+        <ExpoImage
+          source={imageSource}
+          style={s.prodImg}
+          cachePolicy="memory-disk"
+          onError={() => setUseFallback(true)}
         />
-        <View style={s.ratingPin}>
-          <Ionicons name="star" size={9} color={COLORS.primary} />
-          <Text style={s.ratingTxt}>{produto.avaliacoes ?? '4.5'}</Text>
-        </View>
+        <View style={s.prodOverlay} />
       </View>
 
-      {/* Info */}
-      <View style={s.info}>
-        <View>
-          <Text style={s.nome} numberOfLines={2}>{produto.nome}</Text>
-          <Text style={s.desc} numberOfLines={2}>{produto.descricao}</Text>
+      <View style={s.prodInfo}>
+        <View style={s.prodTitleGroup}>
+          <Text style={s.prodNome} numberOfLines={2}>{produto.nome}</Text>
+          <Text style={s.prodDesc} numberOfLines={2}>{produto.descricao}</Text>
         </View>
-
-        <View style={s.footer}>
-          <View>
-            <Text style={s.preco}>{produto.precoFormatado}</Text>
-            <View style={s.tempoRow}>
-              <Ionicons name="time-outline" size={10} color={COLORS.textMuted} />
-              <Text style={s.tempo}>{produto.tempo} min</Text>
-            </View>
+        <View style={s.prodTags}>
+          <View style={s.prodTag}>
+            <Ionicons name="time-outline" size={10} color={COLORS.textMuted} />
+            <Text style={s.prodTagText}>{produto.tempo} min</Text>
           </View>
-          <Pressable
-            style={s.addBtn}
-            onPress={() => router.push(`/produto/${produto.id}`)}
-            hitSlop={8}
-          >
-            <Ionicons name="add" size={18} color={COLORS.text} />
+          <View style={s.prodTag}>
+            <Ionicons name="star" size={10} color={COLORS.primary} />
+            <Text style={s.prodTagText}>{produto.avaliacoes || '4.8'}</Text>
+          </View>
+        </View>
+        <View style={s.prodFooter}>
+          <Text style={s.prodPreco} numberOfLines={1}>{produto.precoFormatado}</Text>
+          <Pressable style={s.addBtn} onPress={() => router.push(`/produto/${produto.id}`)}>
+            <Ionicons name="add" size={16} color={COLORS.background} />
           </Pressable>
         </View>
       </View>
     </Pressable>
   );
+});
+
+// ─── Texto animado "rolando" dentro da barra de busca ────────────────────────
+function BuscaAnimada({ visivel }) {
+  const [index, setIndex] = useState(0);
+  const translateY = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (!visivel) return;
+    const trocar = () => {
+      Animated.parallel([
+        Animated.timing(translateY, { toValue: -16, duration: 260, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0, duration: 220, useNativeDriver: true }),
+      ]).start(() => {
+        setIndex((prev) => (prev + 1) % SUGESTOES_BUSCA.length);
+        translateY.setValue(16);
+        Animated.parallel([
+          Animated.timing(translateY, { toValue: 0, duration: 260, useNativeDriver: true }),
+          Animated.timing(opacity, { toValue: 1, duration: 260, useNativeDriver: true }),
+        ]).start();
+      });
+    };
+    const timer = setInterval(trocar, 4000);
+    return () => clearInterval(timer);
+  }, [visivel]);
+
+  if (!visivel) return null;
+
+  return (
+    <View style={s.suggestionClip} pointerEvents="none">
+      <Animated.Text
+        style={[s.searchPlaceholderTxt, { opacity, transform: [{ translateY }] }]}
+        numberOfLines={1}
+      >
+        {SUGESTOES_BUSCA[index]}
+      </Animated.Text>
+    </View>
+  );
 }
 
 // ─── Tela de Cardápio ─────────────────────────────────────────────────────────
-
-const TABS = ['Todas', 'Batatas', 'Macarrão', 'Bebidas'];
-
-// header:  paddingTop(16) + headerRow(36) + paddingBottom(16) = 68
-// search:  paddingVertical(12*2) + searchBox(44) = 68
-// tabs:    paddingVertical(12*2) + chip(36) = 60
-const HEADER_H = 68;
-const SEARCH_H = 68;
-const TABS_H   = 60;
-const STICKY_H = HEADER_H + SEARCH_H + TABS_H; // 196
 
 export default function Cardapio() {
   const { categoria } = useLocalSearchParams();
   const [tabAtiva, setTabAtiva] = useState(
     TABS.includes(categoria) ? categoria : 'Todas'
   );
-  const [query, setQuery]         = useState('');
-  const [searchFocused, setSearchFocused] = useState(false);
-  const [stickyHeight, setStickyHeight]   = useState(STICKY_H); // medido via onLayout
-  const router                    = useRouter();
-  const { onScroll: globalScroll, resetHeader } = useScrollHandler();
-  const globalHeaderH = useHeaderHeight();
-  const flatListRef               = useRef(null);
+  const [query, setQuery] = useState('');
+  const [buscaFocada, setBuscaFocada] = useState(false);
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { count: totalItens } = useCart();
 
-  // Animated value local para animar o header + abas do próprio cardápio
-  const localScrollY = useRef(new Animated.Value(0)).current;
-  const prevLocal    = useRef(0);
-  const localVisible = useRef(true);
-  const localTransY  = useRef(new Animated.Value(0)).current;
-  const stickyHeightRef = useRef(STICKY_H); // ref para uso dentro do listener sem re-criar
-  const searchAnim   = useRef(new Animated.Value(0)).current; // fade+slide on mount
+  const scrollRef = useRef(null);
+  // guarda o Y de cada seção dentro do ScrollView, preenchido pelo onLayout
+  // de cada seção — usado tanto pra rolar até lá quanto pra saber qual aba
+  // destacar enquanto o usuário rola manualmente
+  const sectionsY = useRef({});
+  const scrollandoProgramaticamente = useRef(false);
 
-  const showLocalHeader = useCallback(() => {
-    if (!localVisible.current) {
-      localVisible.current = true;
-      Animated.spring(localTransY, {
-        toValue: 0, useNativeDriver: true,
-        tension: 80, friction: 12,
-      }).start();
+  const { produtos, loading } = useProductRanking();
+  const { produtos: buscados, loading: lBusca } = useBuscarProdutos(query);
+
+  const disponiveis = produtos.filter((p) => p.disponivel);
+
+  // separa por categoria, mantendo a ordem do ranking (mais pedido primeiro)
+  const secoesComProdutos = SECOES.map((secao) => ({
+    ...secao,
+    produtos: disponiveis.filter((p) => normalizarCategoria(p.categoria).includes(secao.filtro)),
+  }));
+
+  const buscando = query.trim().length > 0;
+
+  // rola suavemente até a seção da aba clicada — nem direto (sem animação),
+  // nem muito devagar, o scrollTo animado padrão já dá essa velocidade média
+  const irParaSecao = (tab) => {
+    setTabAtiva(tab);
+    setQuery('');
+    if (tab === 'Todas') {
+      scrollandoProgramaticamente.current = true;
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+      setTimeout(() => { scrollandoProgramaticamente.current = false; }, 500);
+      return;
     }
-  }, []);
+    const y = sectionsY.current[tab];
+    if (y != null) {
+      scrollandoProgramaticamente.current = true;
+      scrollRef.current?.scrollTo({ y: Math.max(y - SPACING[3], 0), animated: true });
+      setTimeout(() => { scrollandoProgramaticamente.current = false; }, 500);
+    }
+  };
 
-  // Listener de animação do header local
-  useEffect(() => {
-    const id = localScrollY.addListener(({ value }) => {
-      const delta = value - prevLocal.current;
-      prevLocal.current = value;
-
-      if (value <= 10) {
-        showLocalHeader();
-        resetHeader(); // garante header global visível ao voltar ao topo
-      } else if (delta > 6 && localVisible.current) {
-        localVisible.current = false;
-        Animated.timing(localTransY, {
-          toValue: -(stickyHeightRef.current), duration: 220,
-          useNativeDriver: true,
-        }).start();
-      } else if (delta < -6 && !localVisible.current) {
-        showLocalHeader();
+  // enquanto o usuário rola manualmente, vai destacando a aba da seção
+  // que está aparecendo na tela — igual ao iFood
+  const handleScroll = (e) => {
+    if (scrollandoProgramaticamente.current) return;
+    const offsetY = e.nativeEvent.contentOffset.y;
+    let atual = 'Todas';
+    TABS.forEach((tab) => {
+      const y = sectionsY.current[tab];
+      if (y != null && offsetY >= y - SPACING[8]) {
+        atual = tab;
       }
     });
-    return () => localScrollY.removeListener(id);
-  }, []);
-
-  // (animação de entrada da search bar controlada pelo useFocusEffect abaixo)
-
-  // Fix do header: ao receber foco, reseta tudo antes de qualquer animação
-  useFocusEffect(
-    useCallback(() => {
-      // 1. Reseta o estado interno do listener para evitar delta sujo
-      prevLocal.current = 0;
-      localVisible.current = true;
-
-      // 2. Zera os Animated.Values diretamente (sem animar) para o listener
-      //    não disparar hide ao receber eventos com valor antigo
-      localScrollY.setValue(0);
-      localTransY.setValue(0);
-      searchAnim.setValue(0);
-
-      // 3. Força o header global a aparecer
-      resetHeader();
-
-      // 4. Rola pro topo (sem animação para não disparar o listener no meio)
-      flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
-
-      // 5. Roda a animação de entrada da search bar depois do frame settle
-      const t = setTimeout(() => {
-        Animated.spring(searchAnim, {
-          toValue: 1,
-          useNativeDriver: true,
-          tension: 60,
-          friction: 10,
-        }).start();
-      }, 60);
-
-      return () => clearTimeout(t);
-    }, [resetHeader])
-  );
-
-  // valor passado pro hook — passa a string do banco, ou 'Todas' para não filtrar
-  const catParaHook = CATEGORIA_MAP[tabAtiva];
-
-  const { produtos: todos,    loading: lTodos }  = useProdutos();
-  const { produtos: porCat,   loading: lCat }    = useProdutosPorCategoria(catParaHook);
-  const { produtos: buscados, loading: lBusca }  = useBuscarProdutos(query);
-
-  let lista   = [];
-  let loading = false;
-
-  if (query.trim()) {
-    lista   = buscados;
-    loading = lBusca;
-  } else if (tabAtiva === 'Todas') {
-    lista   = todos;
-    loading = lTodos;
-  } else {
-    lista   = porCat;
-    loading = lCat;
-  }
-
-  // Handler combinado: atualiza o localScrollY E o global (para o header do _layout)
-  const handleScroll = useCallback((event) => {
-    const y = event?.nativeEvent?.contentOffset?.y ?? 0;
-    localScrollY.setValue(y);
-    globalScroll(event);
-  }, [globalScroll]);
+    setTabAtiva((prev) => (prev === atual ? prev : atual));
+  };
 
   return (
     <View style={s.screen}>
 
-      {/* ── HEADER + ABAS animados ── */}
-      <Animated.View
-        style={[s.stickyWrap, { top: globalHeaderH + 8, transform: [{ translateY: localTransY }] }]}
-        onLayout={(e) => {
-          const h = e.nativeEvent.layout.height;
-          setStickyHeight(h);
-          stickyHeightRef.current = h;
-        }}
-      >
-        {/* HEADER */}
-        <View style={s.header}>
-          <View style={s.headerRow}>
-            <Pressable style={s.backBtn} onPress={() => router.back()} hitSlop={8}>
-              <Ionicons name="chevron-back" size={20} color={COLORS.primary} />
-            </Pressable>
-            <Text style={s.titulo}>Cardápio</Text>
-            <View style={{ width: 36 }} />
-          </View>
-        </View>
+      {/* HEADER — respeita a barra de notificação/status bar */}
+      <View style={[s.header, { paddingTop: insets.top + SPACING[2] }]}>
 
-        {/* BARRA DE PESQUISA */}
-        <View style={s.searchSection}>
-          <View style={s.searchAccentBar} />
-          <Animated.View
-            style={[
-              s.searchAnimWrap,
-              {
-                opacity: searchAnim,
-                transform: [{
-                  translateX: searchAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [18, 0],
-                  }),
-                }],
-              },
-            ]}
-          >
-            <View style={[s.searchBox, searchFocused && s.searchBoxFocused]}>
-              <View style={s.searchIconWrap}>
-                <Ionicons name="search-outline" size={16} color={searchFocused ? COLORS.primary : COLORS.textMuted} />
-              </View>
+        <View style={s.topRow}>
+          <Pressable style={s.backBtn} onPress={() => router.back()} hitSlop={8}>
+            <Ionicons name="chevron-back" size={22} color={COLORS.text} />
+          </Pressable>
+
+          <View style={s.searchBox}>
+            <Ionicons name="search-outline" size={18} color={COLORS.textMuted} />
+            <View style={s.searchInputWrap}>
               <TextInput
                 style={s.searchInput}
-                placeholder="Buscar produto..."
-                placeholderTextColor={COLORS.textMuted}
                 value={query}
                 onChangeText={setQuery}
-                onFocus={() => setSearchFocused(true)}
-                onBlur={() => setSearchFocused(false)}
+                onFocus={() => setBuscaFocada(true)}
+                onBlur={() => setBuscaFocada(false)}
                 returnKeyType="search"
               />
-              {query.length > 0 && (
-                <Pressable onPress={() => setQuery('')} hitSlop={10} style={s.clearBtn}>
-                  <Ionicons name="close-circle" size={17} color={COLORS.textMuted} />
-                </Pressable>
-              )}
+              <BuscaAnimada visivel={!buscaFocada && query.length === 0} />
             </View>
-          </Animated.View>
+          </View>
+
+          <Pressable style={s.cartBtn} onPress={() => router.push('/cart')} hitSlop={8}>
+            <Ionicons name="cart-outline" size={24} color={COLORS.text} />
+            {totalItens > 0 && (
+              <View style={s.cartBadge}>
+                <Text style={s.cartBadgeTxt}>{totalItens}</Text>
+              </View>
+            )}
+          </Pressable>
         </View>
 
-        {/* ABAS */}
-        <View style={s.tabsContainer}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={s.tabsRow}
-          >
-            {TABS.map((tab) => {
-              const ativo = tab === tabAtiva;
-              return (
-                <Pressable
-                  key={tab}
-                  style={[s.tab, ativo ? s.tabAtivo : s.tabInativo]}
-                  onPress={() => { setTabAtiva(tab); setQuery(''); }}
-                >
-                  <Ionicons
-                    name={CATEGORIA_ICON[tab]}
-                    size={14}
-                    color={ativo ? COLORS.text : COLORS.textMuted}
-                  />
-                  <Text style={[s.tabTxt, ativo ? s.tabTxtAtivo : s.tabTxtInativo]}>
-                    {tab}
-                  </Text>
-                  {ativo && <View style={s.tabActiveDot} />}
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        </View>
-      </Animated.View>
+        {/* CATEGORIAS — agora funcionam como âncora: clicar rola até a seção */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ width: '100%' }}
+          contentContainerStyle={[s.tabsRow, { flexGrow: 1, justifyContent: 'center' }]}
+        >
+          {TABS.map((tab) => {
+            const ativo = tab === tabAtiva && !buscando;
+            return (
+              <Pressable
+                key={tab}
+                style={s.tabItem}
+                onPress={() => irParaSecao(tab)}
+              >
+                <View style={s.tabLabelRow}>
+                  {tab === 'Todas' ? (
+                    <Image source={ICONE_TODAS} style={s.tabIconTodas} resizeMode="contain" />
+                  ) : (
+                    <Text style={[s.tabTxt, ativo ? s.tabTxtAtivo : s.tabTxtInativo]}>
+                      {tab}
+                    </Text>
+                  )}
+                </View>
+                {ativo && <View style={s.tabUnderline} />}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
 
-      {/* ── LISTA ── */}
-      {loading ? (
+      {/* ── CONTEÚDO ── */}
+      {buscando ? (
+        // busca ativa: some com as seções e mostra resultado em grade, igual antes
+        lBusca ? (
+          <View style={s.center}>
+            <ActivityIndicator size="large" color={COLORS.primary} />
+          </View>
+        ) : (
+          <FlatList
+            data={buscados}
+            keyExtractor={(item) => String(item.id)}
+            renderItem={({ item }) => <ProdutoCard produto={item} />}
+            numColumns={2}
+            columnWrapperStyle={s.row}
+            contentContainerStyle={s.listContent}
+            showsVerticalScrollIndicator={false}
+            ListEmptyComponent={
+              <View style={s.center}>
+                <Ionicons name="storefront-outline" size={44} color={COLORS.border} />
+                <Text style={s.emptyTitle}>Nenhum produto</Text>
+                <Text style={s.emptyDesc}>Tente outra busca.</Text>
+              </View>
+            }
+          />
+        )
+      ) : loading ? (
         <View style={s.center}>
           <ActivityIndicator size="large" color={COLORS.primary} />
         </View>
       ) : (
-        <FlatList
-          ref={flatListRef}
-          data={lista}
-          keyExtractor={(item) => String(item.id)}
-          renderItem={({ item }) => <ProdutoCard produto={item} />}
-          contentContainerStyle={[s.listContent, { paddingTop: globalHeaderH + stickyHeight + SPACING[4] }]}
+        // sem busca: rola descendo e as seções vão aparecendo, batata sempre
+        // primeiro, cada uma ordenada do produto mais pedido pro menos pedido
+        <ScrollView
+          ref={scrollRef}
           showsVerticalScrollIndicator={false}
+          contentContainerStyle={s.scrollContent}
           onScroll={handleScroll}
           scrollEventThrottle={16}
-          ListEmptyComponent={
-            <View style={s.center}>
-              <Ionicons name="storefront-outline" size={44} color={COLORS.border} />
-              <Text style={s.emptyTitle}>Nenhum produto</Text>
-              <Text style={s.emptyDesc}>Tente outra categoria ou busca.</Text>
+        >
+          {secoesComProdutos.map((secao) => (
+            <View
+              key={secao.tab}
+              style={s.section}
+              onLayout={(e) => { sectionsY.current[secao.tab] = e.nativeEvent.layout.y; }}
+            >
+              <View style={s.cardapioHeaderWrap}>
+                <View style={s.cardapioHeaderLeft}>
+                  <MaterialCommunityIcons name={secao.icon} size={30} color={COLORS.primary} />
+                  <Text style={s.cardapioTitle} numberOfLines={1}>{secao.titulo}</Text>
+                </View>
+                <Text style={s.cardapioDesc}>{secao.descricao}</Text>
+              </View>
+
+              {secao.produtos.length === 0 ? (
+                <View style={s.center}>
+                  <Text style={s.emptyDesc}>Nenhum produto nessa categoria ainda.</Text>
+                </View>
+              ) : (
+                <View style={s.prodGrid}>
+                  {secao.produtos.map((p) => (
+                    <ProdutoCard key={p.id} produto={p} />
+                  ))}
+                </View>
+              )}
             </View>
-          }
-        />
+          ))}
+        </ScrollView>
       )}
     </View>
   );
@@ -360,261 +378,255 @@ export default function Cardapio() {
 
 // ─── StyleSheet ───────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: COLORS.background },
-
-  // STICKY WRAPPER — header + abas animados juntos
-  stickyWrap: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 100,
-  },
+  screen: { flex: 1, backgroundColor: '#FFFFFF' },
 
   // HEADER
   header: {
-    paddingHorizontal: SPACING[5],
-    paddingTop: SPACING[4],
-    paddingBottom: SPACING[4],
-    backgroundColor: COLORS.backgroundElevated,
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
-    ...SHADOWS.sm,
+    paddingBottom: 0,
   },
-
-  // SEARCH SECTION — barra amarela + campo
-  searchSection: {
-    backgroundColor: COLORS.backgroundElevated,
-    paddingHorizontal: SPACING[5],
-    paddingTop: SPACING[3],
-    paddingBottom: SPACING[3],
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+  topRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING[3],
-  },
-  searchAccentBar: {
-    width: 4,
-    height: 44,
-    borderRadius: RADIUS.full,
-    backgroundColor: COLORS.primary,
-    shadowColor: COLORS.primary,
-    shadowOpacity: 0.55,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 4,
-    flexShrink: 0,
-  },
-  searchAnimWrap: {
-    flex: 1,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: RADIUS.md,
-    backgroundColor: COLORS.backgroundCard,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  titulo: {
-    flex: 1,
-    textAlign: 'center',
-    color: COLORS.text,
-    fontWeight: '700',
-    fontSize: TYPOGRAPHY.sizes.xl,
-    letterSpacing: -0.3,
+    paddingHorizontal: SPACING[5],
+    paddingBottom: SPACING[3],
   },
 
-  // SEARCH — melhorado
+  backBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: RADIUS.full,
+    backgroundColor: '#F0F0F2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+
+  // BARRA DE BUSCA
   searchBox: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING[2],
-    paddingHorizontal: SPACING[3],
-    paddingVertical: SPACING[2],
-    backgroundColor: COLORS.backgroundCard,
+    paddingHorizontal: SPACING[4],
+    height: 44,
+    backgroundColor: '#EDEDEF',
     borderRadius: RADIUS.xl,
-    borderWidth: 1.5,
-    borderColor: COLORS.border,
-    ...SHADOWS.sm,
-    minHeight: 44,
   },
-  searchBoxFocused: {
-    borderColor: COLORS.primary,
-    backgroundColor: COLORS.backgroundElevated,
-    shadowColor: COLORS.primary,
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    elevation: 5,
-  },
-  searchIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: RADIUS.md,
-    backgroundColor: COLORS.backgroundElevated,
-    alignItems: 'center',
+  searchInputWrap: {
+    flex: 1,
+    height: '100%',
     justifyContent: 'center',
   },
   searchInput: {
-    flex: 1,
     fontSize: TYPOGRAPHY.sizes.sm,
     color: COLORS.text,
     paddingVertical: 0,
-    fontWeight: '500',
+    height: '100%',
   },
-  clearBtn: {
-    width: 32,
-    height: 32,
+  suggestionClip: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 18,
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  searchPlaceholderTxt: {
+    fontSize: TYPOGRAPHY.sizes.sm,
+    color: COLORS.textMuted,
+  },
+
+  // CARRINHO
+  cartBtn: {
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  // ABAS — melhoradas com ScrollView horizontal
-  tabsContainer: {
-    backgroundColor: COLORS.backgroundElevated,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+  cartBadge: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    backgroundColor: COLORS.error ?? '#E63535',
+    borderRadius: RADIUS.full,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
   },
+  cartBadgeTxt: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+
+  // CATEGORIAS (âncoras)
   tabsRow: {
     flexDirection: 'row',
-    gap: SPACING[2],
-    paddingHorizontal: SPACING[4],
-    paddingVertical: SPACING[3],
+    gap: 28,
+    paddingHorizontal: SPACING[5],
   },
-  tab: {
+  tabItem: {
+    alignItems: 'center',
+    paddingBottom: 0,
+  },
+  tabLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: SPACING[4],
-    paddingVertical: SPACING[2],
-    borderRadius: RADIUS.full,
-    borderWidth: 1.5,
-    position: 'relative',
-    minHeight: 36,
+    gap: 4,
+    height: 30,
   },
-  tabAtivo: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
-    ...SHADOWS.sm,
-    shadowColor: COLORS.primary,
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    elevation: 4,
-  },
-  tabInativo: {
-    backgroundColor: COLORS.backgroundCard,
-    borderColor: COLORS.border,
+  tabIconTodas: {
+    width: 30,
+    height: 30,
   },
   tabTxt: {
-    fontSize: TYPOGRAPHY.sizes.xs,
+    fontSize: TYPOGRAPHY.sizes.sm,
     fontWeight: '700',
-    letterSpacing: 0.2,
   },
   tabTxtAtivo:   { color: COLORS.text      },
   tabTxtInativo: { color: COLORS.textMuted },
-  tabActiveDot: {
-    position: 'absolute',
-    bottom: -1,
-    left: '50%',
-    width: 4,
-    height: 4,
-    borderRadius: 2,
+  tabUnderline: {
+    marginTop: 1,
+    height: 2,
+    width: '100%',
+    borderRadius: RADIUS.full,
     backgroundColor: COLORS.primary,
   },
 
-  // LISTA
-  listContent: {
-    paddingHorizontal: SPACING[5],
+  // SCROLL / SEÇÕES
+  scrollContent: {
+    paddingTop: SPACING[4],
     paddingBottom: SPACING[12],
-    gap: SPACING[3],
+  },
+  section: {
+    paddingTop: SPACING[1],
+    gap: SPACING[2],
+  },
+  cardapioHeaderWrap: {
+    paddingHorizontal: SPACING[5],
+  },
+  cardapioHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING[2],
+  },
+  cardapioTitle: {
+    color: COLORS.text,
+    fontWeight: '700',
+    fontSize: TYPOGRAPHY.sizes.lg,
+    letterSpacing: -0.3,
+    flexShrink: 1,
+  },
+  cardapioDesc: {
+    color: COLORS.textMuted,
+    fontSize: TYPOGRAPHY.sizes.sm,
+    marginTop: 2,
   },
 
-  // CARD
-  card: {
+  // LISTA (busca)
+  listContent: {
+    paddingHorizontal: SPACING[5],
+    paddingTop: SPACING[4],
+    paddingBottom: SPACING[12],
+    gap: SPACING[4],
+  },
+  row: {
+    justifyContent: 'space-between',
+    gap: SPACING[4],
+  },
+
+  // GRID (seções e busca)
+  prodGrid: {
+    paddingHorizontal: SPACING[5],
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING[4],
+  },
+
+  // CARD GRANDE — igual ao do index.js
+  prodCard: {
+    width: '47%',
     backgroundColor: COLORS.backgroundCard,
     borderRadius: RADIUS.xl,
     borderWidth: 1,
     borderColor: COLORS.border,
     overflow: 'hidden',
-    height: 112,
     ...SHADOWS.sm,
   },
-  imgBox: {
-    width: 112,
-    height: 112,
-    flexShrink: 0,
+  prodImgWrapper: {
+    width: '100%',
+    height: 140,
     position: 'relative',
   },
-  img: {
-    width: 112,
-    height: 112,
+  prodImg: {
+    width: '100%',
+    height: '100%',
     backgroundColor: COLORS.backgroundElevated,
   },
-  ratingPin: {
-    position: 'absolute',
-    bottom: SPACING[2],
-    left: SPACING[2],
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    borderRadius: RADIUS.sm,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    zIndex: 1,
+  prodOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.1)',
   },
-  ratingTxt: { color: '#fff', fontSize: 10, fontWeight: '700' },
-
-  // INFO
-  info: {
-    flex: 1,
+  prodInfo: {
     padding: SPACING[3],
-    justifyContent: 'space-between',
-    overflow: 'hidden',
+    gap: SPACING[2],
   },
-  nome: {
+  prodTitleGroup: {
+    gap: 1,
+  },
+  prodNome: {
     color: COLORS.text,
     fontWeight: '700',
     fontSize: TYPOGRAPHY.sizes.sm,
-    lineHeight: 19,
-    marginBottom: 3,
-  },
-  desc: {
-    color: COLORS.textMuted,
-    fontSize: 11,
     lineHeight: 16,
+    height: 32,
   },
-  footer: {
+  prodDesc: {
+    color: COLORS.textMuted,
+    fontSize: TYPOGRAPHY.sizes.xs,
+    lineHeight: 14,
+    height: 28,
+  },
+  prodTags: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    marginTop: SPACING[2],
+    gap: SPACING[3],
   },
-  preco: {
-    color: COLORS.primary,
-    fontWeight: '800',
-    fontSize: TYPOGRAPHY.sizes.base,
-  },
-  tempoRow: {
+  prodTag: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    marginTop: 2,
   },
-  tempo: { color: COLORS.textMuted, fontSize: 10 },
+  prodTagText: {
+    color: COLORS.textMuted,
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  prodFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  prodPreco: {
+    flexShrink: 1,
+    marginRight: SPACING[2],
+    color: '#000000',
+    fontWeight: '800',
+    fontSize: TYPOGRAPHY.sizes.base,
+  },
   addBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: RADIUS.md,
+    flexShrink: 0,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: COLORS.primary,
     alignItems: 'center',
     justifyContent: 'center',

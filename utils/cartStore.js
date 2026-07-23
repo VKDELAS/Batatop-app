@@ -8,6 +8,10 @@ const listeners = new Set();
 let floatingHidden = false;
 const floatingListeners = new Set();
 
+// Cupom selecionado na tela /cupons, persistido aqui pro checkout ler.
+let selectedCoupon = null;
+const couponListeners = new Set();
+
 export const cartStore = {
   getCart() {
     return cart;
@@ -30,6 +34,17 @@ export const cartStore = {
     if (floatingHidden === hidden) return;
     floatingHidden = hidden;
     floatingListeners.forEach((l) => l(floatingHidden));
+  },
+  getCoupon() {
+    return selectedCoupon;
+  },
+  subscribeCoupon(listener) {
+    couponListeners.add(listener);
+    return () => couponListeners.delete(listener);
+  },
+  setCoupon(coupon) {
+    selectedCoupon = coupon;
+    couponListeners.forEach((l) => l(selectedCoupon));
   },
   addToCart(product) {
     const qty = product.quantidade || product.quantity || 1;
@@ -61,6 +76,7 @@ export const cartStore = {
   },
   clearCart() {
     cart = [];
+    this.setCoupon(null);
     this.emit();
   },
   getCartCount() {
@@ -74,6 +90,7 @@ export const cartStore = {
 export function useCart() {
   const [items, setItems] = useState(cartStore.getCart());
   const [hideFloating, setHideFloatingState] = useState(cartStore.isFloatingHidden());
+  const [coupon, setCouponState] = useState(cartStore.getCoupon());
 
   useEffect(() => {
     return cartStore.subscribe(setItems);
@@ -81,6 +98,10 @@ export function useCart() {
 
   useEffect(() => {
     return cartStore.subscribeFloating(setHideFloatingState);
+  }, []);
+
+  useEffect(() => {
+    return cartStore.subscribeCoupon(setCouponState);
   }, []);
 
   return {
@@ -95,5 +116,8 @@ export function useCart() {
     // flutuante "ver carrinho" enquanto estão em foco.
     hideFloating,
     setHideFloating: (hidden) => cartStore.setFloatingHidden(hidden),
+    // Cupom selecionado na tela /cupons.
+    coupon,
+    setCoupon: (c) => cartStore.setCoupon(c),
   };
 }
